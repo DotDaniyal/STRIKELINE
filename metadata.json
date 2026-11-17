@@ -1,0 +1,10 @@
+{
+  "name": "STRIKELINE — Competitive 3D Multiplayer FPS",
+  "description": "Fast-paced browser-based 3D first-person shooter with real-time authoritative multiplayer, 7 weapons, 6 competitive maps, 8 game modes, custom loadouts, progression, and training range.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
