@@ -165,42 +165,36 @@ export function LobbyWorkspace({
 
   return (
     <div className="relative min-h-screen w-full text-slate-100 overflow-x-hidden bg-[#07090e]">
-      {/* Immersive 3D Armory Command Stage Backdrop */}
+      {/* Isolated 3D Armory Stage Backdrop */}
       <div ref={stageRef} className="fixed inset-0 z-0 pointer-events-none" />
 
-      {/* Atmospheric High-Contrast Vignette Scrim */}
+      {/* Atmospheric Vignette Scrim */}
       <div
         aria-hidden="true"
         className="fixed inset-0 z-[1] pointer-events-none"
         style={{
           background:
-            'radial-gradient(circle at 50% 42%, rgba(7,9,14,0.12) 0%, rgba(7,9,14,0.82) 100%)',
+            'radial-gradient(circle at 50% 45%, rgba(7,9,14,0.15) 0%, rgba(7,9,14,0.78) 100%)',
         }}
       />
 
-      {/* Command Center Shell */}
+      {/* Foreground Shell */}
       <div className="relative z-10 min-h-screen flex flex-col justify-between">
-        {/* Top Command Center Header Hub */}
-        <header className="bg-[#080b12]/92 backdrop-blur-xl border-b border-slate-800/80 px-6 lg:px-12 py-3.5">
+        {/* Minimalist Top Command Bar */}
+        <header className="bg-[#090c12]/92 backdrop-blur-md border-b border-slate-800/85 px-4 lg:px-10 py-3">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-6 overflow-x-auto max-w-full">
-              <div className="flex items-center gap-3 shrink-0">
-                <svg width="30" height="30" viewBox="0 0 42 42" fill="none" aria-hidden="true">
-                  <polygon points="21,2 40,12 40,30 21,40 2,30 2,12" stroke="#f59e0b" strokeWidth="2.4" fill="#0b0f17" />
+            <div className="flex items-center gap-5 overflow-x-auto max-w-full">
+              <div className="flex items-center gap-2.5 shrink-0 pr-2">
+                <svg width="28" height="28" viewBox="0 0 42 42" fill="none" aria-hidden="true">
+                  <polygon points="21,2 40,12 40,30 21,40 2,30 2,12" stroke="#f59e0b" strokeWidth="2.4" fill="#0e131c" />
                   <circle cx="21" cy="21" r="4" fill="#f59e0b" />
                 </svg>
-                <div>
-                  <span className="font-display font-bold text-base tracking-[0.18em] text-white block leading-none">
-                    STRIKELINE
-                  </span>
-                  <span className="text-[9px] font-mono-tabular uppercase tracking-widest text-amber-400">
-                    Command Center
-                  </span>
-                </div>
+                <span className="font-display font-bold text-lg tracking-[0.15em] text-white">
+                  STRIKELINE
+                </span>
               </div>
 
-              {/* Centered Command Nav Tabs */}
-              <nav className="flex items-center gap-1 bg-[#05070a]/80 p-1 rounded-lg border border-slate-800/80" aria-label="Command navigation">
+              <nav className="flex items-center gap-1.5" aria-label="Main navigation">
                 {tabs.map((item) => {
                   const active = tab === item.id;
                   return (
@@ -214,13 +208,21 @@ export function LobbyWorkspace({
                         audioEngine.playUiClick(680);
                         setTab(item.id);
                       }}
-                      className={`relative px-4 py-2 text-xs font-display font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap shrink-0 rounded-md ${
+                      className={`relative px-3.5 py-2 text-xs font-display font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap shrink-0 sl-chamfer-sm ${
                         active
-                          ? 'text-slate-950 bg-amber-500 shadow-md'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800/40'
+                          ? 'text-slate-950'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
                       }`}
                     >
-                      <span>{item.label}</span>
+                      {active && (
+                        <motion.span
+                          layoutId="lobby-nav-active"
+                          transition={{ type: 'spring', stiffness: 480, damping: 36 }}
+                          className="absolute inset-0 bg-amber-500 sl-chamfer-sm"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="relative z-10">{item.label}</span>
                     </button>
                   );
                 })}
@@ -228,7 +230,7 @@ export function LobbyWorkspace({
                   variant="cyan"
                   size="sm"
                   onClick={onEnterTraining}
-                  className="ml-2 rounded-md"
+                  className="ml-1"
                 >
                   <Crosshair className="w-3.5 h-3.5" />
                   {t.training}
@@ -236,9 +238,9 @@ export function LobbyWorkspace({
               </nav>
             </div>
 
-            {/* Operator Telemetry & Utility Actions */}
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="hidden sm:flex items-center gap-3 px-3.5 py-1.5 bg-[#05070a]/90 border border-slate-800/85 rounded-lg text-xs">
+            {/* Operator Telemetry & Utilities */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 bg-[#07090e]/90 border border-slate-800 sl-chamfer-sm text-xs">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-white truncate">
@@ -247,16 +249,16 @@ export function LobbyWorkspace({
                       )}
                       {profile.username}
                     </span>
-                    <span className="font-mono-tabular text-[10px] text-slate-400">
+                    <span className="font-mono-tabular text-[11px] text-slate-400">
                       Lv.{profile.level}
                     </span>
                   </div>
-                  <div className="w-full h-1 bg-slate-800/90 mt-1 overflow-hidden rounded-full">
+                  <div className="w-full h-1 bg-slate-800 mt-1 overflow-hidden sl-chamfer-sm">
                     <div className="h-full bg-amber-500" style={{ width: `${xpPct}%` }} />
                   </div>
                 </div>
                 <span className="h-5 w-px bg-slate-800" />
-                <span className="flex items-center gap-1.5 font-mono-tabular font-bold text-amber-400">
+                <span className="flex items-center gap-1 font-mono-tabular font-bold text-amber-400">
                   <Coins className="w-3.5 h-3.5" />
                   {profile.credits}
                 </span>
@@ -268,7 +270,7 @@ export function LobbyWorkspace({
                   audioEngine.playUiClick(650);
                   setNewsOpen(true);
                 }}
-                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
+                className="p-2 sl-chamfer-sm bg-[#07090e]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
                 title="News & Patch Notes"
                 aria-label="Open news and patch notes"
               >
@@ -280,7 +282,7 @@ export function LobbyWorkspace({
                   audioEngine.playUiClick(680);
                   onOpenSettings();
                 }}
-                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
+                className="p-2 sl-chamfer-sm bg-[#07090e]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
                 title={t.settings}
                 aria-label={t.settings}
               >
@@ -292,7 +294,7 @@ export function LobbyWorkspace({
                   audioEngine.playUiClick(540);
                   onLogout();
                 }}
-                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-rose-300 hover:border-rose-500/40 cursor-pointer shrink-0 transition"
+                className="p-2 sl-chamfer-sm bg-[#07090e]/90 border border-slate-800 text-slate-300 hover:text-rose-300 hover:border-rose-500/45 cursor-pointer shrink-0 transition"
                 title="Sign Out"
                 aria-label="Sign out"
               >
@@ -302,7 +304,7 @@ export function LobbyWorkspace({
           </div>
         </header>
 
-        {/* Matchmaking Queue / Party Banners */}
+        {/* Matchmaking / Squad Banners */}
         {searching && (
           <div className="bg-amber-500/15 border-b border-amber-500/40 px-6 py-2.5 backdrop-blur-md">
             <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs">
@@ -345,16 +347,15 @@ export function LobbyWorkspace({
           </div>
         )}
 
-        {/* Immersive Centered Workspace Area */}
+        {/* Main Tab Workspace */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-10 py-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={tab}
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="bg-[#07090e]/88 backdrop-blur-xl border border-slate-800/85 rounded-2xl p-6 lg:p-8 shadow-2xl"
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             >
               {tab === 'play' && (
                 <PlayTab
@@ -401,11 +402,11 @@ export function LobbyWorkspace({
           </AnimatePresence>
         </main>
 
-        {/* Command Center Footer */}
-        <footer className="border-t border-slate-800/80 bg-[#080b12]/90 px-6 lg:px-12 py-3.5">
+        {/* Minimalist Footer */}
+        <footer className="border-t border-slate-800/80 bg-[#090c12]/90 px-6 lg:px-10 py-3">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-            <span className="font-mono-tabular">STRIKELINE Command Center v2.4</span>
-            <div className="flex items-center gap-5">
+            <span className="font-mono-tabular">STRIKELINE Combat Operations</span>
+            <div className="flex items-center gap-4">
               <a
                 href="/privacy"
                 onClick={(e) => {
@@ -470,14 +471,14 @@ export function LobbyWorkspace({
               )}
             </div>
 
-            <div className="bg-[#05070a] border border-slate-800 p-3 space-y-2 max-h-60 overflow-y-auto rounded-xl">
+            <div className="bg-[#07090e] border border-slate-800 p-3 space-y-2 max-h-60 overflow-y-auto">
               <div className="text-[11px] font-mono-tabular uppercase text-slate-400 flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5" /> Connected Operatives ({stagingPlayers.length}/{stagingRoom.maxPlayers})
               </div>
               {stagingPlayers.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center justify-between px-3 py-2 bg-[#080b12] border border-slate-800 text-xs rounded-lg"
+                  className="flex items-center justify-between px-3 py-2 bg-[#0c1018] border border-slate-800 text-xs"
                 >
                   <span className="font-semibold text-white flex items-center gap-2">
                     {p.id === stagingRoom.hostId && <Shield className="w-3.5 h-3.5 text-amber-400" />}
@@ -488,7 +489,7 @@ export function LobbyWorkspace({
                     <button
                       type="button"
                       onClick={() => onKickPlayer(p.id)}
-                      className="px-2 py-0.5 bg-rose-600/25 text-rose-300 text-[11px] cursor-pointer rounded"
+                      className="px-2 py-0.5 bg-rose-600/25 text-rose-300 text-[11px] cursor-pointer"
                     >
                       Kick
                     </button>
@@ -510,7 +511,7 @@ export function LobbyWorkspace({
         >
           <div className="space-y-3">
             {news.map((item) => (
-              <article key={item.id} className="p-4 bg-[#05070a] border border-slate-800 rounded-xl space-y-1.5">
+              <article key={item.id} className="p-4 bg-[#07090e] border border-slate-800 sl-chamfer-sm space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] font-mono-tabular">
                   <span className="text-amber-400 uppercase">
                     {item.category} · {item.version}
