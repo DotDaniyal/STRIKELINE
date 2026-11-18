@@ -2,18 +2,37 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>STRIKELINE — Competitive 3D Multiplayer FPS</title>
-    <meta name="description" content="Fast-paced browser-based 3D first-person shooter with real-time authoritative multiplayer, 7 weapons, 6 competitive maps, 8 game modes, custom loadouts, and training range." />
-    <meta property="og:title" content="STRIKELINE — Competitive 3D Multiplayer FPS" />
-    <meta property="og:description" content="Precision gunplay, fluid slide movement, and real-time competitive 3D multiplayer in your browser." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0e14" />
+    <title>STRIKELINE | Competitive 3D Multiplayer FPS</title>
+    <meta name="description" content="Play STRIKELINE, a real-time 3D multiplayer FPS in the browser featuring 7 weapons, 6 competitive arenas, 8 game modes, custom loadouts, and an interactive training range." />
+    <meta name="robots" content="index, follow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="STRIKELINE | Competitive 3D Multiplayer FPS" />
+    <meta property="og:description" content="Precision gunplay, fluid movement, and real-time authoritative 3D multiplayer in your browser." />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="STRIKELINE" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="STRIKELINE | Competitive 3D Multiplayer FPS" />
+    <meta name="twitter:description" content="Precision gunplay, fluid movement, and real-time authoritative 3D multiplayer in your browser." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoGame",
+        "name": "STRIKELINE",
+        "description": "Browser-based competitive 3D multiplayer first-person shooter with authoritative servers, 7 weapons, 6 arenas, 8 game modes, and a ballistics training range.",
+        "genre": ["First-Person Shooter", "Action", "Multiplayer"],
+        "gamePlatform": "Web Browser",
+        "applicationCategory": "Game",
+        "operatingSystem": "Windows, macOS, Linux, Android, iOS",
+        "playMode": ["MultiPlayer", "SinglePlayer"]
+      }
+    </script>
   </head>
-  <body class="bg-[#0B0E14] text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200 overflow-hidden">
+  <body class="bg-[#0B0E14] text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200 overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

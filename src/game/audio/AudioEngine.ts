@@ -251,6 +251,10 @@ class AudioEngine {
     };
   }
 
+  private ambientOsc: OscillatorNode | null = null;
+  private ambientSubOsc: OscillatorNode | null = null;
+  private ambientMode: 'off' | 'lobby' | 'match' = 'off';
+
   public playUiClick(pitch = 640) {
     const ctx = this.ensureContext();
     if (!ctx || !this.uiGain) return;
@@ -266,6 +270,134 @@ class AudioEngine {
     g.connect(this.uiGain);
     osc.start(now);
     osc.stop(now + 0.055);
+  }
+
+  public playUiHover() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.uiGain || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(980, now);
+    osc.frequency.exponentialRampToValueAtTime(760, now + 0.02);
+    g.gain.setValueAtTime(0.025, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.022);
+    osc.connect(g);
+    g.connect(this.uiGain);
+    osc.start(now);
+    osc.stop(now + 0.026);
+  }
+
+  public playMatchStart() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    [392.0, 523.25, 659.25].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+      g.gain.setValueAtTime(0.14, now + idx * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.28);
+      osc.connect(g);
+      g.connect(this.sfxGain!);
+      osc.start(now + idx * 0.09);
+      osc.stop(now + idx * 0.09 + 0.3);
+    });
+  }
+
+  public playVictory() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.095);
+      g.gain.setValueAtTime(0.16, now + idx * 0.095);
+      g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.095 + 0.42);
+      osc.connect(g);
+      g.connect(this.sfxGain!);
+      osc.start(now + idx * 0.095);
+      osc.stop(now + idx * 0.095 + 0.45);
+    });
+  }
+
+  public playDefeat() {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    [329.63, 277.18, 220.0].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sawtooth';
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 620;
+      osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+      g.gain.setValueAtTime(0.12, now + idx * 0.14);
+      g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.38);
+      osc.connect(filter);
+      filter.connect(g);
+      g.connect(this.sfxGain!);
+      osc.start(now + idx * 0.14);
+      osc.stop(now + idx * 0.14 + 0.42);
+    });
+  }
+
+  public setAmbientMode(mode: 'off' | 'lobby' | 'match') {
+    if (this.ambientMode === mode) return;
+    this.ambientMode = mode;
+
+    if (this.ambientOsc) {
+      try {
+        this.ambientOsc.stop();
+        this.ambientOsc.disconnect();
+      } catch {
+        // Ignore already stopped
+      }
+      this.ambientOsc = null;
+    }
+    if (this.ambientSubOsc) {
+      try {
+        this.ambientSubOsc.stop();
+        this.ambientSubOsc.disconnect();
+      } catch {
+        // Ignore already stopped
+      }
+      this.ambientSubOsc = null;
+    }
+
+    if (mode === 'off') return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.ambientGain) return;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = mode === 'lobby' ? 190 : 140;
+
+    const droneGain = ctx.createGain();
+    droneGain.gain.value = mode === 'lobby' ? 0.045 : 0.025;
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = mode === 'lobby' ? 55 : 46;
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = mode === 'lobby' ? 82.41 : 69.3;
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(droneGain);
+    droneGain.connect(this.ambientGain);
+
+    osc1.start();
+    osc2.start();
+    this.ambientOsc = osc1;
+    this.ambientSubOsc = osc2;
   }
 }
 

@@ -1,6 +1,7 @@
 import type { MapDefinition, MovementState, PlayerSettings, Vec3 } from '../../../shared/types/game.ts';
-import { getSurfaceHeightAt } from '../../../server/game/physics.ts';
+import { getSurfaceHeightAt } from '../../../shared/physics/ballistics.ts';
 import { audioEngine } from '../audio/AudioEngine.ts';
+import { InputHandler } from './InputHandler.ts';
 
 export class PlayerController {
   public x = 0;
@@ -15,7 +16,8 @@ export class PlayerController {
   public grounded = true;
   public movementState: MovementState = 'idle';
 
-  private keys = new Set<string>();
+  public readonly input = new InputHandler();
+
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private slideTimer = 0;
@@ -29,10 +31,6 @@ export class PlayerController {
   public recoilPitch = 0;
   public recoilYaw = 0;
 
-  // Touch inputs (mobile)
-  public touchMoveX = 0;
-  public touchMoveY = 0;
-
   private map: MapDefinition;
   private destructibles: Map<string, number>;
   private speedScale = 1;
@@ -41,6 +39,19 @@ export class PlayerController {
   constructor(map: MapDefinition, destructibles: Map<string, number>) {
     this.map = map;
     this.destructibles = destructibles;
+  }
+
+  public get touchMoveX(): number {
+    return this.input.touchMoveX;
+  }
+  public set touchMoveX(val: number) {
+    this.input.touchMoveX = val;
+  }
+  public get touchMoveY(): number {
+    return this.input.touchMoveY;
+  }
+  public set touchMoveY(val: number) {
+    this.input.touchMoveY = val;
   }
 
   public setMap(map: MapDefinition, destructibles: Map<string, number>) {
@@ -67,23 +78,11 @@ export class PlayerController {
   }
 
   public setKey(code: string, down: boolean, settings: PlayerSettings) {
-    if (down) {
-      if (code === settings.keybinds.jump && !this.keys.has(code)) {
-        this.jumpBufferTimer = 0.14;
-      }
-      if (code === settings.keybinds.crouch && !this.keys.has(code)) {
-        this.tryStartSlide();
-      }
-      this.keys.add(code);
-    } else {
-      this.keys.delete(code);
-    }
+    this.input.setKey(code, down, settings);
   }
 
   public clearKeys() {
-    this.keys.clear();
-    this.touchMoveX = 0;
-    this.touchMoveY = 0;
+    this.input.clearKeys();
   }
 
   public triggerJump() {
@@ -117,40 +116,16 @@ export class PlayerController {
   }
 
   public update(dt: number, settings: PlayerSettings, weaponSpeedMult: number, isAds: boolean, touchCrouch = false) {
-    const kb = settings.keybinds;
-    let moveFwd = (this.keys.has(kb.forward) ? 1 : 0) - (this.keys.has(kb.backward) ? 1 : 0);
-    let moveRight = (this.keys.has(kb.right) ? 1 : 0) - (this.keys.has(kb.left) ? 1 : 0);
-
-    // Combine touch thumbstick
-    if (Math.abs(this.touchMoveX) > 0.08 || Math.abs(this.touchMoveY) > 0.08) {
-      moveRight += this.touchMoveX;
-      moveFwd -= this.touchMoveY;
+    const sample = this.input.sampleMovement(settings, isAds, touchCrouch);
+    if (sample.gamepadLookX !== 0 || sample.gamepadLookY !== 0) {
+      this.applyLookDelta(sample.gamepadLookX, sample.gamepadLookY, settings, isAds, 55);
     }
-
-    // Poll Gamepad if connected
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads[0];
-    if (pad) {
-      const dz = settings.gamepadDeadzone;
-      if (Math.abs(pad.axes[0]) > dz) moveRight += pad.axes[0];
-      if (Math.abs(pad.axes[1]) > dz) moveFwd -= pad.axes[1];
-      if (Math.abs(pad.axes[2]) > dz || Math.abs(pad.axes[3]) > dz) {
-        const rx = Math.abs(pad.axes[2]) > dz ? pad.axes[2] : 0;
-        const ry = Math.abs(pad.axes[3]) > dz ? pad.axes[3] : 0;
-        this.applyLookDelta(rx * 18 * settings.gamepadSensitivity, ry * 14 * settings.gamepadSensitivity, settings, isAds, 55);
-      }
-      if (pad.buttons[0]?.pressed) this.jumpBufferTimer = 0.12;
-      if (pad.buttons[1]?.pressed) this.tryStartSlide();
+    if (sample.jumpPressed) {
+      this.jumpBufferTimer = 0.14;
     }
-
-    const inputLen = Math.hypot(moveFwd, moveRight);
-    if (inputLen > 1) {
-      moveFwd /= inputLen;
-      moveRight /= inputLen;
+    if (sample.slideRequested) {
+      this.tryStartSlide();
     }
-
-    const wantCrouch = this.keys.has(kb.crouch) || touchCrouch;
-    const wantSprint = this.keys.has(kb.sprint) && moveFwd > 0.3 && !wantCrouch && !isAds;
 
     if (this.slideTimer > 0) this.slideTimer = Math.max(0, this.slideTimer - dt);
     if (this.slideCooldown > 0) this.slideCooldown = Math.max(0, this.slideCooldown - dt);
@@ -164,16 +139,15 @@ export class PlayerController {
     const rightX = Math.cos(this.yaw);
     const rightZ = -Math.sin(this.yaw);
 
-    const wishX = fwdX * moveFwd + rightX * moveRight;
-    const wishZ = fwdZ * moveFwd + rightZ * moveRight;
+    const wishX = fwdX * sample.moveFwd + rightX * sample.moveRight;
+    const wishZ = fwdZ * sample.moveFwd + rightZ * sample.moveRight;
 
     const baseSpeed =
-      (wantCrouch ? 3.8 : wantSprint ? 9.4 : isAds ? 4.8 : 6.8) *
+      (sample.wantCrouch ? 3.8 : sample.wantSprint ? 9.4 : isAds ? 4.8 : 6.8) *
       weaponSpeedMult *
       this.speedScale;
 
     if (this.slideTimer > 0) {
-      // Slide friction decay
       const decay = Math.exp(-2.6 * dt);
       this.vx *= decay;
       this.vz *= decay;
@@ -182,7 +156,6 @@ export class PlayerController {
       this.vx = this.vx + (wishX * baseSpeed - this.vx) * Math.min(1, accel * dt);
       this.vz = this.vz + (wishZ * baseSpeed - this.vz) * Math.min(1, accel * dt);
     } else {
-      // Air control / air strafing
       const airAccel = 4.8;
       this.vx += wishX * baseSpeed * airAccel * dt;
       this.vz += wishZ * baseSpeed * airAccel * dt;
@@ -212,7 +185,7 @@ export class PlayerController {
 
     // Horizontal swept collision (resolve X then Z for crisp wall sliding)
     const radius = 0.42;
-    const playerHeight = wantCrouch || this.slideTimer > 0 ? 1.15 : 1.82;
+    const playerHeight = sample.wantCrouch || this.slideTimer > 0 ? 1.15 : 1.82;
 
     const tryMoveAxis = (nx: number, nz: number): boolean => {
       if (
@@ -231,7 +204,6 @@ export class PlayerController {
           nz + radius > col.min.z &&
           nz - radius < col.max.z
         ) {
-          // Allow stepping onto low ledges <= 0.55m
           if (col.min.y < this.y + playerHeight && col.max.y > this.y + 0.55) {
             return false;
           }
@@ -267,7 +239,7 @@ export class PlayerController {
     }
 
     // Eye height smoothing
-    const targetEye = this.slideTimer > 0 ? 0.92 : wantCrouch ? 1.12 : 1.62;
+    const targetEye = this.slideTimer > 0 ? 0.92 : sample.wantCrouch ? 1.12 : 1.62;
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 14 * dt);
     this.landingDip *= Math.exp(-12 * dt);
     this.shakeAmount *= Math.exp(-14 * dt);
@@ -280,7 +252,7 @@ export class PlayerController {
     const horiz = Math.hypot(this.vx, this.vz);
     if (this.slideTimer > 0) this.movementState = 'slide';
     else if (!this.grounded) this.movementState = this.vy > 0 ? 'jump' : 'fall';
-    else if (wantCrouch) this.movementState = 'crouch';
+    else if (sample.wantCrouch) this.movementState = 'crouch';
     else if (horiz > 7.6) this.movementState = 'sprint';
     else if (horiz > 0.6) this.movementState = 'walk';
     else this.movementState = 'idle';

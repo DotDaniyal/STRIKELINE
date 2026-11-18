@@ -1,14 +1,27 @@
 import { useState, type FormEvent } from 'react';
+import { motion } from 'motion/react';
+import { Crosshair, Shield, Swords, Target } from 'lucide-react';
 import type { UserProfile } from '../../shared/types/game.ts';
 import { api, setAuthToken } from '../services/api.ts';
 import { audioEngine } from '../game/audio/AudioEngine.ts';
+import { TacticalButton } from './ui/TacticalButton.tsx';
+import { SegmentedControl } from './ui/SegmentedControl.tsx';
+import type { LegalDocType } from './LegalDocumentModal.tsx';
 
 interface Props {
   onAuthenticated: (profile: UserProfile, token: string) => void;
+  onOpenLegal: (doc: LegalDocType) => void;
 }
 
-export function TitleAuthScreen({ onAuthenticated }: Props) {
-  const [mode, setMode] = useState<'quick' | 'login' | 'register' | 'reset'>('quick');
+const AUTH_TABS = [
+  { id: 'quick', label: 'Quick Deploy' },
+  { id: 'login', label: 'Sign In' },
+  { id: 'register', label: 'Register' },
+  { id: 'reset', label: 'Recovery' },
+] as const;
+
+export function TitleAuthScreen({ onAuthenticated, onOpenLegal }: Props) {
+  const [tab, setTab] = useState<'quick' | 'login' | 'register' | 'reset'>('quick');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +32,6 @@ export function TitleAuthScreen({ onAuthenticated }: Props) {
   const [busy, setBusy] = useState(false);
 
   const handleGuestDeploy = async () => {
-    audioEngine.playUiClick(720);
     setBusy(true);
     setError(null);
     try {
@@ -40,24 +52,24 @@ export function TitleAuthScreen({ onAuthenticated }: Props) {
     setError(null);
     setInfo(null);
     try {
-      if (mode === 'login') {
+      if (tab === 'login') {
         const res = await api.login(username, password);
         setAuthToken(res.token);
         onAuthenticated(res.profile, res.token);
-      } else if (mode === 'register') {
+      } else if (tab === 'register') {
         const res = await api.register(username, email, password);
         setAuthToken(res.token);
         onAuthenticated(res.profile, res.token);
-      } else if (mode === 'reset') {
+      } else if (tab === 'reset') {
         if (!issuedResetToken) {
           const res = await api.requestPasswordReset(email);
           setIssuedResetToken(res.resetToken);
           setResetTokenInput(res.resetToken);
-          setInfo('Verification token generated. Enter your new password below.');
+          setInfo('Verification token generated. Enter new password.');
         } else {
           await api.completePasswordReset(resetTokenInput, password);
-          setInfo('Password updated. You may now sign in.');
-          setMode('login');
+          setInfo('Password updated successfully. You may now sign in.');
+          setTab('login');
           setIssuedResetToken(null);
         }
       }
@@ -69,14 +81,14 @@ export function TitleAuthScreen({ onAuthenticated }: Props) {
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-[#0b0e14]">
-      {/* Key-Art Armory Backdrop with graceful gradient fallback */}
-      <div className="absolute inset-0">
+    <div className="relative w-full min-h-screen flex flex-col justify-between overflow-x-hidden bg-[#07090e]">
+      {/* 3D Key-Art Armory Atmospheric Backdrop */}
+      <div className="absolute inset-0 pointer-events-none">
         <img
           src="/src/assets/images/hero_armory_backdrop_1794933859969.jpg"
-          alt="Strikeline Tactical Armory"
+          alt="Strikeline Armory"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover opacity-55"
+          className="w-full h-full object-cover opacity-35"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).style.display = 'none';
           }}
@@ -85,198 +97,243 @@ export function TitleAuthScreen({ onAuthenticated }: Props) {
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(95deg, rgba(11,14,20,0.96) 0%, rgba(11,14,20,0.82) 45%, rgba(11,14,20,0.45) 100%)',
+              'radial-gradient(circle at 50% 45%, rgba(7,9,14,0.45) 0%, rgba(7,9,14,0.92) 85%)',
           }}
         />
       </div>
 
-      {/* Top Brand Lockup */}
-      <div className="relative z-10 px-6 md:px-14 pt-8 flex items-center justify-between">
+      {/* Top Navigation */}
+      <header className="relative z-10 px-6 lg:px-12 py-5 flex items-center justify-between border-b border-slate-800/80">
         <div className="flex items-center gap-3">
-          <svg width="42" height="42" viewBox="0 0 42 42" fill="none" aria-hidden="true">
-            <polygon points="21,2 40,12 40,30 21,40 2,30 2,12" stroke="#f59e0b" strokeWidth="2.2" fill="#111827" />
-            <line x1="21" y1="8" x2="21" y2="16" stroke="#f8fafc" strokeWidth="2.2" />
-            <line x1="21" y1="26" x2="21" y2="34" stroke="#f8fafc" strokeWidth="2.2" />
-            <line x1="8" y1="21" x2="16" y2="21" stroke="#f8fafc" strokeWidth="2.2" />
-            <line x1="26" y1="21" x2="34" y2="21" stroke="#f8fafc" strokeWidth="2.2" />
-            <circle cx="21" cy="21" r="3" fill="#f59e0b" />
+          <svg width="34" height="34" viewBox="0 0 42 42" fill="none" aria-hidden="true">
+            <polygon points="21,2 40,12 40,30 21,40 2,30 2,12" stroke="#f59e0b" strokeWidth="2.4" fill="#0e131c" />
+            <circle cx="21" cy="21" r="4" fill="#f59e0b" />
           </svg>
           <div>
-            <span className="font-display text-2xl font-bold tracking-wider text-slate-100">
+            <span className="font-display text-lg font-bold tracking-[0.16em] text-white">
               STRIKELINE
+            </span>
+            <span className="text-[9px] font-mono-tabular uppercase tracking-widest text-amber-400 block">
+              Tactical FPS Arena
             </span>
           </div>
         </div>
-        <div className="text-xs text-slate-400 font-mono-tabular hidden sm:block">
-          Season 1 · Competitive 3D Multiplayer
+        <div className="text-xs font-mono-tabular text-slate-400 hidden sm:block">
+          Authoritative 25Hz Netcode
         </div>
-      </div>
+      </header>
 
-      {/* Center Hero & Auth Panel */}
-      <div className="relative z-10 px-6 md:px-14 my-auto max-w-xl">
-        <h1 className="font-display text-4xl md:text-6xl font-bold tracking-tight text-slate-50 leading-tight text-balance">
-          Precision Gunplay. Real-Time Combat.
-        </h1>
-        <p className="mt-3 text-slate-300 text-sm md:text-base max-w-md leading-relaxed">
-          Drop directly into authoritative 3D arenas across 8 competitive modes, 7 tuned weapons, and 6 multi-level maps.
-        </p>
+      {/* Main 3D-Oriented Minimalist Deck */}
+      <main className="relative z-10 max-w-6xl w-full mx-auto px-6 lg:px-12 my-auto py-12">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16 items-center">
+          {/* Left Briefing */}
+          <motion.div
+            initial={{ opacity: 0, x: -16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="lg:col-span-7 space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#0c1018]/90 border border-amber-500/40 sl-chamfer-sm text-[10px] font-mono-tabular uppercase tracking-wider text-amber-300">
+              <Crosshair className="w-3.5 h-3.5" /> Next-Gen Browser FPS
+            </div>
 
-        {/* Mode Switcher Tabs */}
-        <div className="mt-7 inline-flex items-center gap-1 p-1 bg-[#131822] border border-slate-800 rounded-lg">
-          {(
-            [
-              ['quick', 'Quick Deploy'],
-              ['login', 'Sign In'],
-              ['register', 'Create Account'],
-              ['reset', 'Recovery'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                audioEngine.playUiClick();
-                setMode(id);
+            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight text-white leading-[1.02]">
+              Precision Combat.
+              <br />
+              <span className="text-amber-400">Zero Compromise.</span>
+            </h1>
+
+            <p className="text-sm sm:text-base text-slate-300 max-w-lg leading-relaxed">
+              Authoritative multiplayer tactical shooter with slide-jump momentum, crisp hit registration, custom weapon finishes, and private bot skirmishes.
+            </p>
+
+            <div className="grid grid-cols-3 gap-3 pt-2 max-w-md">
+              <div className="p-3 bg-[#0c1018]/80 border border-slate-800/85 sl-chamfer-sm">
+                <div className="text-[10px] font-mono-tabular text-amber-400 uppercase">Weapons</div>
+                <div className="font-display font-bold text-lg text-white mt-0.5">7 Loadouts</div>
+              </div>
+              <div className="p-3 bg-[#0c1018]/80 border border-slate-800/85 sl-chamfer-sm">
+                <div className="text-[10px] font-mono-tabular text-sky-400 uppercase">Modes</div>
+                <div className="font-display font-bold text-lg text-white mt-0.5">8 Rulesets</div>
+              </div>
+              <div className="p-3 bg-[#0c1018]/80 border border-slate-800/85 sl-chamfer-sm">
+                <div className="text-[10px] font-mono-tabular text-emerald-400 uppercase">Arenas</div>
+                <div className="font-display font-bold text-lg text-white mt-0.5">6 Maps</div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Right Minimalist Auth Terminal */}
+          <motion.div
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+            className="lg:col-span-5 bg-[#090c12]/92 border border-slate-800/90 sl-chamfer p-6 sm:p-7 space-y-5 backdrop-blur-md shadow-2xl"
+          >
+            <SegmentedControl
+              layoutId="auth-tab-selector"
+              options={AUTH_TABS}
+              value={tab}
+              onChange={(next) => {
+                setTab(next);
                 setError(null);
                 setInfo(null);
               }}
-              className={`px-3.5 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                mode === id
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+              size="sm"
+            />
 
-        {/* Auth Form / Quick Deploy */}
-        <div className="mt-4 bg-[#111620] border border-slate-800 rounded-xl p-5 shadow-2xl">
-          {error && (
-            <div className="mb-3 px-3 py-2 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs">
-              {error}
-            </div>
-          )}
-          {info && (
-            <div className="mb-3 px-3 py-2 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-200 text-xs">
-              {info}
-            </div>
-          )}
-
-          {mode === 'quick' ? (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                  Callsign (optional for guest deployment)
-                </label>
-                <input
-                  type="text"
-                  maxLength={14}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Operative"
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
-                />
+            {error && (
+              <div className="px-3 py-2 bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs sl-chamfer-sm">
+                {error}
               </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleGuestDeploy}
-                className="w-full py-3 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-base tracking-wide transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {busy ? 'Initializing Session...' : 'Enter Combat Lobby'}
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-3.5">
-              {mode !== 'reset' && (
+            )}
+            {info && (
+              <div className="px-3 py-2 bg-sky-500/15 border border-sky-500/40 text-sky-200 text-xs sl-chamfer-sm">
+                {info}
+              </div>
+            )}
+
+            {tab === 'quick' ? (
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">
-                    {mode === 'login' ? 'Username or Email' : 'Username'}
+                  <label className="block text-[11px] font-mono-tabular uppercase tracking-wider text-slate-400 mb-1.5">
+                    Operator Callsign (Optional)
                   </label>
                   <input
                     type="text"
-                    required
+                    maxLength={14}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder={mode === 'login' ? 'Callsign or email' : '3-16 characters'}
-                    className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+                    placeholder="Operative"
+                    className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500 sl-chamfer-sm"
                   />
                 </div>
-              )}
+                <TacticalButton
+                  type="button"
+                  variant="primary"
+                  size="lg"
+                  disabled={busy}
+                  onClick={handleGuestDeploy}
+                  className="w-full"
+                >
+                  {busy ? 'Initializing Session...' : 'Enter Combat Lobby'}
+                </TacticalButton>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {tab !== 'reset' && (
+                  <div>
+                    <label className="block text-[11px] font-mono-tabular uppercase tracking-wider text-slate-400 mb-1">
+                      {tab === 'login' ? 'Username or Email' : 'Username'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder={tab === 'login' ? 'Callsign or email' : '3-16 characters'}
+                      className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500 sl-chamfer-sm"
+                    />
+                  </div>
+                )}
 
-              {(mode === 'register' || mode === 'reset') && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="operator@domain.com"
-                    className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
+                {(tab === 'register' || tab === 'reset') && (
+                  <div>
+                    <label className="block text-[11px] font-mono-tabular uppercase tracking-wider text-slate-400 mb-1">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="operator@domain.com"
+                      className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500 sl-chamfer-sm"
+                    />
+                  </div>
+                )}
 
-              {mode === 'reset' && issuedResetToken && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">
-                    Verification Token (Issued: <span className="font-mono-tabular text-amber-400">{issuedResetToken}</span>)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={resetTokenInput}
-                    onChange={(e) => setResetTokenInput(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100 font-mono-tabular focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
+                {tab === 'reset' && issuedResetToken && (
+                  <div>
+                    <label className="block text-[11px] font-mono-tabular uppercase tracking-wider text-slate-400 mb-1">
+                      Verification Token (<span className="text-amber-400">{issuedResetToken}</span>)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={resetTokenInput}
+                      onChange={(e) => setResetTokenInput(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100 font-mono-tabular focus:outline-none focus:border-amber-500 sl-chamfer-sm"
+                    />
+                  </div>
+                )}
 
-              {(mode !== 'reset' || issuedResetToken) && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">
-                    {mode === 'reset' ? 'New Password' : 'Password'}
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                    className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
+                {(tab !== 'reset' || issuedResetToken) && (
+                  <div>
+                    <label className="block text-[11px] font-mono-tabular uppercase tracking-wider text-slate-400 mb-1">
+                      {tab === 'reset' ? 'New Password' : 'Password'}
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-amber-500 sl-chamfer-sm"
+                    />
+                  </div>
+                )}
 
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full py-3 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-sm tracking-wide transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {busy
-                  ? 'Authenticating...'
-                  : mode === 'login'
-                  ? 'Sign In'
-                  : mode === 'register'
-                  ? 'Create Account & Deploy'
-                  : issuedResetToken
-                  ? 'Reset Password'
-                  : 'Request Verification Token'}
-              </button>
-            </form>
-          )}
+                <TacticalButton
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  disabled={busy}
+                  className="w-full"
+                >
+                  {busy
+                    ? 'Authenticating...'
+                    : tab === 'login'
+                    ? 'Sign In'
+                    : tab === 'register'
+                    ? 'Create Account & Deploy'
+                    : issuedResetToken
+                    ? 'Reset Password'
+                    : 'Request Verification Token'}
+                </TacticalButton>
+              </form>
+            )}
+          </motion.div>
         </div>
-      </div>
+      </main>
 
-      {/* Flat Control Hint Footer */}
-      <div className="relative z-10 px-6 md:px-14 pb-6 text-xs text-slate-400 font-mono-tabular flex flex-wrap items-center justify-between gap-4">
-        <span>WASD Move · Shift Sprint · C Crouch / Slide · Space Jump · LMB Fire · RMB Aim · R Reload · Esc Pause</span>
-        <span>Desktop · Mobile Touch · Gamepad Ready</span>
-      </div>
+      {/* Footer */}
+      <footer className="relative z-10 px-6 lg:px-12 py-4 border-t border-slate-800/80 bg-[#07090e]/90 text-[11px] text-slate-400 font-mono-tabular flex flex-wrap items-center justify-between gap-3">
+        <span>WASD Move · Shift Sprint · C Slide · Space Jump · LMB Fire · RMB Aim · R Reload</span>
+        <div className="flex items-center gap-4">
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenLegal('privacy');
+            }}
+            className="hover:text-amber-400 underline underline-offset-4 cursor-pointer"
+          >
+            Privacy Policy
+          </a>
+          <a
+            href="/terms"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenLegal('terms');
+            }}
+            className="hover:text-amber-400 underline underline-offset-4 cursor-pointer"
+          >
+            Terms &amp; Conditions
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

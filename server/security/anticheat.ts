@@ -1,6 +1,6 @@
 import type { MapDefinition, Vec3, WeaponId } from '../../shared/types/game.ts';
 import { WEAPONS } from '../../shared/constants/weapons.ts';
-import { recordAudit } from '../database/db.ts';
+import { recordAudit } from '../persistence/index.ts';
 
 export interface PlayerAntiCheatState {
   lastPos: Vec3;

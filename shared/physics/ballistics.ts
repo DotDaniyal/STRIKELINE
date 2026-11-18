@@ -1,4 +1,4 @@
-import type { MapBoxCollider, MapDefinition, Vec3 } from '../../shared/types/game.ts';
+import type { MapDefinition, Vec3 } from '../types/game.ts';
 
 export function rayIntersectsAABB(
   origin: Vec3,

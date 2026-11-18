@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Bell,
   Coins,
@@ -8,7 +9,6 @@ import {
   Settings,
   Shield,
   Users,
-  X,
 } from 'lucide-react';
 import type {
   GameModeId,
@@ -24,15 +24,18 @@ import type {
   WeaponId,
 } from '../../shared/types/game.ts';
 import { TRANSLATIONS } from '../../shared/constants/i18n.ts';
-import { LobbyScene } from '../game/engine/LobbyScene.ts';
+import { LobbyScene, type LobbyFocusMode } from '../game/engine/LobbyScene.ts';
 import { api } from '../services/api.ts';
 import { audioEngine } from '../game/audio/AudioEngine.ts';
+import { TacticalButton } from './ui/TacticalButton.tsx';
+import { ModalShell } from './ui/ModalShell.tsx';
 import { PlayTab } from './lobby/PlayTab.tsx';
 import { ArsenalTab } from './lobby/ArsenalTab.tsx';
 import { ShopTab } from './lobby/ShopTab.tsx';
 import { SocialTab } from './lobby/SocialTab.tsx';
 import { CareerTab, LeaderboardTab } from './lobby/LeaderboardAndCareerTabs.tsx';
 import { AdminTab } from './lobby/AdminTab.tsx';
+import type { LegalDocType } from './LegalDocumentModal.tsx';
 
 export type LobbyTabId = 'play' | 'arsenal' | 'shop' | 'social' | 'leaderboard' | 'career' | 'admin';
 
@@ -67,6 +70,7 @@ interface Props {
   onRespondPartyInvite: (inviteId: string, accept: boolean) => void;
   onKickParty: (userId: string) => void;
   onPromoteParty: (userId: string) => void;
+  onOpenLegal: (doc: LegalDocType) => void;
 }
 
 export function LobbyWorkspace({
@@ -93,6 +97,7 @@ export function LobbyWorkspace({
   onRespondPartyInvite,
   onKickParty,
   onPromoteParty,
+  onOpenLegal,
 }: Props) {
   const [tab, setTab] = useState<LobbyTabId>('play');
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -116,11 +121,27 @@ export function LobbyWorkspace({
       scene.dispose();
       lobbySceneRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     lobbySceneRef.current?.updateLoadout(activeWeapon, activeSkin, profile.equippedOperator);
   }, [activeWeapon, activeSkin, profile.equippedOperator]);
+
+  useEffect(() => {
+    const mode: LobbyFocusMode = tab === 'arsenal' ? 'arsenal' : 'play';
+    lobbySceneRef.current?.setFocusMode(mode);
+  }, [tab]);
+
+  useEffect(() => {
+    const unlockAmbient = () => {
+      audioEngine.setAmbientMode('lobby');
+    };
+    window.addEventListener('pointerdown', unlockAmbient, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAmbient);
+    };
+  }, []);
 
   useEffect(() => {
     api.getNews()
@@ -140,75 +161,102 @@ export function LobbyWorkspace({
       : []),
   ];
 
+  const xpPct = Math.max(4, Math.min(100, Math.round((profile.xp / Math.max(1, profile.xpToNext)) * 100)));
+
   return (
-    <div className="relative min-h-screen w-full text-slate-100 overflow-x-hidden">
-      {/* Isolated Live 3D Armory Backdrop */}
+    <div className="relative min-h-screen w-full text-slate-100 overflow-x-hidden bg-[#07090e]">
+      {/* Immersive 3D Armory Command Stage Backdrop */}
       <div ref={stageRef} className="fixed inset-0 z-0 pointer-events-none" />
 
-      {/* Foreground Shell */}
-      <div className="relative z-10 min-h-screen flex flex-col">
-        {/* Top Navigation Bar */}
-        <header className="bg-[#0a0e16]/94 border-b border-slate-800 px-4 lg:px-8 py-3">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-5 overflow-x-auto">
-              <div className="flex items-center gap-2 shrink-0 pr-2">
-                <div className="w-2 h-6 bg-amber-500 rounded-sm" />
-                <span className="font-display font-bold text-lg tracking-wider text-white">
-                  STRIKELINE
-                </span>
+      {/* Atmospheric High-Contrast Vignette Scrim */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 z-[1] pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(circle at 50% 42%, rgba(7,9,14,0.12) 0%, rgba(7,9,14,0.82) 100%)',
+        }}
+      />
+
+      {/* Command Center Shell */}
+      <div className="relative z-10 min-h-screen flex flex-col justify-between">
+        {/* Top Command Center Header Hub */}
+        <header className="bg-[#080b12]/92 backdrop-blur-xl border-b border-slate-800/80 px-6 lg:px-12 py-3.5">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-6 overflow-x-auto max-w-full">
+              <div className="flex items-center gap-3 shrink-0">
+                <svg width="30" height="30" viewBox="0 0 42 42" fill="none" aria-hidden="true">
+                  <polygon points="21,2 40,12 40,30 21,40 2,30 2,12" stroke="#f59e0b" strokeWidth="2.4" fill="#0b0f17" />
+                  <circle cx="21" cy="21" r="4" fill="#f59e0b" />
+                </svg>
+                <div>
+                  <span className="font-display font-bold text-base tracking-[0.18em] text-white block leading-none">
+                    STRIKELINE
+                  </span>
+                  <span className="text-[9px] font-mono-tabular uppercase tracking-widest text-amber-400">
+                    Command Center
+                  </span>
+                </div>
               </div>
 
-              <nav className="flex items-center gap-1">
+              {/* Centered Command Nav Tabs */}
+              <nav className="flex items-center gap-1 bg-[#05070a]/80 p-1 rounded-lg border border-slate-800/80" aria-label="Command navigation">
                 {tabs.map((item) => {
                   const active = tab === item.id;
                   return (
                     <button
                       key={item.id}
                       type="button"
+                      onMouseEnter={() => {
+                        if (!active) audioEngine.playUiHover();
+                      }}
                       onClick={() => {
-                        audioEngine.playUiClick(660);
+                        audioEngine.playUiClick(680);
                         setTab(item.id);
                       }}
-                      className={`px-3.5 py-2 rounded-lg text-xs font-display font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`relative px-4 py-2 text-xs font-display font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap shrink-0 rounded-md ${
                         active
-                          ? 'bg-amber-500 text-slate-950'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                          ? 'text-slate-950 bg-amber-500 shadow-md'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/40'
                       }`}
                     >
-                      {item.label}
+                      <span>{item.label}</span>
                     </button>
                   );
                 })}
-                <button
-                  type="button"
-                  onClick={() => {
-                    audioEngine.playUiClick(740);
-                    onEnterTraining();
-                  }}
-                  className="px-3.5 py-2 rounded-lg text-xs font-display font-bold uppercase tracking-wider text-cyan-300 hover:bg-cyan-500/15 border border-cyan-500/30 transition cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ml-1"
+                <TacticalButton
+                  variant="cyan"
+                  size="sm"
+                  onClick={onEnterTraining}
+                  className="ml-2 rounded-md"
                 >
                   <Crosshair className="w-3.5 h-3.5" />
                   {t.training}
-                </button>
+                </TacticalButton>
               </nav>
             </div>
 
-            {/* Right Operator Status & Actions */}
-            <div className="flex items-center gap-2.5 shrink-0">
-              <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-[#0e1420] border border-slate-800 text-xs">
-                <div>
-                  <span className="font-semibold text-white">
-                    {profile.clanTag && (
-                      <span className="font-mono text-amber-400 mr-1">[{profile.clanTag}]</span>
-                    )}
-                    {profile.username}
-                  </span>
-                  <span className="ml-2 font-mono text-[11px] text-slate-400 tabular-nums">
-                    Lv.{profile.level}
-                  </span>
+            {/* Operator Telemetry & Utility Actions */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="hidden sm:flex items-center gap-3 px-3.5 py-1.5 bg-[#05070a]/90 border border-slate-800/85 rounded-lg text-xs">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white truncate">
+                      {profile.clanTag && (
+                        <span className="font-mono-tabular text-amber-400 mr-1">[{profile.clanTag}]</span>
+                      )}
+                      {profile.username}
+                    </span>
+                    <span className="font-mono-tabular text-[10px] text-slate-400">
+                      Lv.{profile.level}
+                    </span>
+                  </div>
+                  <div className="w-full h-1 bg-slate-800/90 mt-1 overflow-hidden rounded-full">
+                    <div className="h-full bg-amber-500" style={{ width: `${xpPct}%` }} />
+                  </div>
                 </div>
-                <span className="h-3.5 w-px bg-slate-700" />
-                <span className="flex items-center gap-1 font-mono font-bold text-amber-400 tabular-nums">
+                <span className="h-5 w-px bg-slate-800" />
+                <span className="flex items-center gap-1.5 font-mono-tabular font-bold text-amber-400">
                   <Coins className="w-3.5 h-3.5" />
                   {profile.credits}
                 </span>
@@ -216,9 +264,13 @@ export function LobbyWorkspace({
 
               <button
                 type="button"
-                onClick={() => setNewsOpen(true)}
-                className="p-2 rounded-lg bg-[#0e1420] border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0"
+                onClick={() => {
+                  audioEngine.playUiClick(650);
+                  setNewsOpen(true);
+                }}
+                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
                 title="News & Patch Notes"
+                aria-label="Open news and patch notes"
               >
                 <Newspaper className="w-4 h-4" />
               </button>
@@ -228,16 +280,21 @@ export function LobbyWorkspace({
                   audioEngine.playUiClick(680);
                   onOpenSettings();
                 }}
-                className="p-2 rounded-lg bg-[#0e1420] border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0"
+                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-600 cursor-pointer shrink-0 transition"
                 title={t.settings}
+                aria-label={t.settings}
               >
                 <Settings className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={onLogout}
-                className="p-2 rounded-lg bg-[#0e1420] border border-slate-800 text-slate-300 hover:text-rose-300 hover:border-rose-500/40 cursor-pointer shrink-0"
+                onClick={() => {
+                  audioEngine.playUiClick(540);
+                  onLogout();
+                }}
+                className="p-2 rounded-lg bg-[#05070a]/90 border border-slate-800 text-slate-300 hover:text-rose-300 hover:border-rose-500/40 cursor-pointer shrink-0 transition"
                 title="Sign Out"
+                aria-label="Sign out"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -245,27 +302,22 @@ export function LobbyWorkspace({
           </div>
         </header>
 
-        {/* Matchmaking Queue Bar */}
+        {/* Matchmaking Queue / Party Banners */}
         {searching && (
-          <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2.5">
+          <div className="bg-amber-500/15 border-b border-amber-500/40 px-6 py-2.5 backdrop-blur-md">
             <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs">
               <div className="font-display font-bold uppercase tracking-wider text-amber-300">
                 Searching for Competitive Match...
               </div>
-              <button
-                type="button"
-                onClick={onCancelQueue}
-                className="px-3 py-1 rounded bg-rose-600 text-white font-semibold cursor-pointer whitespace-nowrap shrink-0"
-              >
+              <TacticalButton variant="danger" size="sm" onClick={onCancelQueue}>
                 {t.cancelQueue}
-              </button>
+              </TacticalButton>
             </div>
           </div>
         )}
 
-        {/* Incoming Party Invite Banner */}
         {partyInvite && (
-          <div className="bg-sky-600/20 border-b border-sky-500/40 px-4 py-2.5">
+          <div className="bg-sky-600/20 border-b border-sky-500/40 px-6 py-2.5 backdrop-blur-md">
             <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2 text-sky-100">
                 <Bell className="w-4 h-4 text-sky-400" />
@@ -274,121 +326,169 @@ export function LobbyWorkspace({
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
+                <TacticalButton
+                  variant="primary"
+                  size="sm"
                   onClick={() => onRespondPartyInvite(partyInvite.id, true)}
-                  className="px-3 py-1 rounded bg-emerald-500 text-slate-950 font-bold cursor-pointer"
                 >
                   Accept
-                </button>
-                <button
-                  type="button"
+                </TacticalButton>
+                <TacticalButton
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onRespondPartyInvite(partyInvite.id, false)}
-                  className="px-3 py-1 rounded bg-slate-800 text-slate-300 cursor-pointer"
                 >
                   Decline
-                </button>
+                </TacticalButton>
               </div>
             </div>
           </div>
         )}
 
-        {/* Main Content */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6">
-          {tab === 'play' && (
-            <PlayTab
-              profile={profile}
-              party={party}
-              searching={searching}
-              onQuickPlay={onQuickPlay}
-              onCancelQueue={onCancelQueue}
-              onCreatePrivate={onCreatePrivate}
-              onJoinRoom={onJoinRoom}
-              onEnterTraining={onEnterTraining}
-              onCreateParty={onCreateParty}
-              onLeaveParty={onLeaveParty}
-              onKickParty={onKickParty}
-              onPromoteParty={onPromoteParty}
-              onOpenNews={() => setNewsOpen(true)}
-              latestNews={news[0] ?? null}
-            />
-          )}
-          {tab === 'arsenal' && (
-            <ArsenalTab
-              profile={profile}
-              onProfileUpdated={onProfileUpdated}
-              onPreviewChange={(w, ws, os) => lobbySceneRef.current?.updateLoadout(w, ws, os)}
-            />
-          )}
-          {tab === 'shop' && <ShopTab profile={profile} onProfileUpdated={onProfileUpdated} />}
-          {tab === 'social' && (
-            <SocialTab
-              profile={profile}
-              onProfileUpdated={onProfileUpdated}
-              onInviteToParty={onInviteParty}
-              onJoinRoomCode={(code) => onJoinRoom(code)}
-            />
-          )}
-          {tab === 'leaderboard' && <LeaderboardTab currentUserId={profile.id} />}
-          {tab === 'career' && (
-            <CareerTab profile={profile} onProfileUpdated={onProfileUpdated} />
-          )}
-          {tab === 'admin' && <AdminTab />}
+        {/* Immersive Centered Workspace Area */}
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-10 py-6">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={tab}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="bg-[#07090e]/88 backdrop-blur-xl border border-slate-800/85 rounded-2xl p-6 lg:p-8 shadow-2xl"
+            >
+              {tab === 'play' && (
+                <PlayTab
+                  profile={profile}
+                  party={party}
+                  searching={searching}
+                  onQuickPlay={onQuickPlay}
+                  onCancelQueue={onCancelQueue}
+                  onCreatePrivate={onCreatePrivate}
+                  onJoinRoom={onJoinRoom}
+                  onEnterTraining={onEnterTraining}
+                  onCreateParty={onCreateParty}
+                  onLeaveParty={onLeaveParty}
+                  onKickParty={onKickParty}
+                  onPromoteParty={onPromoteParty}
+                  onOpenNews={() => setNewsOpen(true)}
+                  latestNews={news[0] ?? null}
+                />
+              )}
+              {tab === 'arsenal' && (
+                <ArsenalTab
+                  profile={profile}
+                  onProfileUpdated={onProfileUpdated}
+                  onPreviewChange={(w, ws, os) => lobbySceneRef.current?.updateLoadout(w, ws, os)}
+                  onRotateShowcase={(deltaRad) => lobbySceneRef.current?.rotateShowcase(deltaRad)}
+                  onFocusStage={(mode) => lobbySceneRef.current?.setFocusMode(mode)}
+                />
+              )}
+              {tab === 'shop' && <ShopTab profile={profile} onProfileUpdated={onProfileUpdated} />}
+              {tab === 'social' && (
+                <SocialTab
+                  profile={profile}
+                  onProfileUpdated={onProfileUpdated}
+                  onInviteToParty={onInviteParty}
+                  onJoinRoomCode={(code) => onJoinRoom(code)}
+                />
+              )}
+              {tab === 'leaderboard' && <LeaderboardTab currentUserId={profile.id} />}
+              {tab === 'career' && (
+                <CareerTab profile={profile} onProfileUpdated={onProfileUpdated} />
+              )}
+              {tab === 'admin' && <AdminTab />}
+            </motion.div>
+          </AnimatePresence>
         </main>
+
+        {/* Command Center Footer */}
+        <footer className="border-t border-slate-800/80 bg-[#080b12]/90 px-6 lg:px-12 py-3.5">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+            <span className="font-mono-tabular">STRIKELINE Command Center v2.4</span>
+            <div className="flex items-center gap-5">
+              <a
+                href="/privacy"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onOpenLegal('privacy');
+                }}
+                className="hover:text-amber-400 underline underline-offset-4 cursor-pointer"
+              >
+                Privacy Policy
+              </a>
+              <a
+                href="/terms"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onOpenLegal('terms');
+                }}
+                className="hover:text-amber-400 underline underline-offset-4 cursor-pointer"
+              >
+                Terms &amp; Conditions
+              </a>
+            </div>
+          </div>
+        </footer>
       </div>
 
-      {/* Private Room Staging Lobby Modal */}
+      {/* Private Room Staging Modal */}
       {stagingRoom && stagingRoom.isPrivate && stagingRoom.state === 'waiting' && (
-        <div className="fixed inset-0 z-40 bg-black/80 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-[#111620] border border-slate-700 rounded-xl p-6 space-y-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-[11px] font-mono uppercase text-sky-400">Private Match Lobby</div>
-                <h2 className="font-display text-2xl font-bold text-white">
-                  {stagingRoom.mode.toUpperCase()} · {stagingRoom.mapId.replace('_', ' ')}
-                </h2>
-                <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-2">
-                  <span>
-                    Room Code:{' '}
-                    <strong className="font-mono text-amber-400 text-sm select-all">
-                      {stagingRoom.roomCode}
-                    </strong>
-                  </span>
-                  {stagingRoom.mutators.headshotOnly && <span>· Headshots Only</span>}
-                  {stagingRoom.mutators.lowGravity && <span>· Low Gravity</span>}
-                  {(stagingRoom.mutators.botsCount ?? 0) > 0 && (
-                    <span>· {stagingRoom.mutators.botsCount} Bots ({stagingRoom.mutators.botDifficulty})</span>
-                  )}
-                </div>
+        <ModalShell
+          title={`${stagingRoom.mode.toUpperCase()} · ${stagingRoom.mapId.replace('_', ' ')}`}
+          subtitle={`Room Code: ${stagingRoom.roomCode}`}
+          maxWidthClass="max-w-2xl"
+          onClose={onLeaveRoom}
+          footer={
+            <>
+              <span className="text-xs text-slate-400">
+                Share code <span className="font-mono-tabular text-amber-400">{stagingRoom.roomCode}</span> for friends to join.
+              </span>
+              <div className="flex items-center gap-2">
+                <TacticalButton variant="secondary" size="sm" onClick={onLeaveRoom}>
+                  Leave Room
+                </TacticalButton>
+                {stagingRoom.hostId === profile.id ? (
+                  <TacticalButton variant="primary" size="md" onClick={onStartPrivateMatch}>
+                    Deploy Match
+                  </TacticalButton>
+                ) : (
+                  <span className="text-xs font-mono-tabular text-sky-400">Waiting for host...</span>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={onLeaveRoom}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
-              >
-                Leave Room
-              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="text-xs text-slate-400 flex flex-wrap gap-3 font-mono-tabular">
+              <span>Max {stagingRoom.maxPlayers} Operatives</span>
+              {stagingRoom.mutators.headshotOnly && <span className="text-amber-400">Headshots Only</span>}
+              {stagingRoom.mutators.lowGravity && <span className="text-sky-400">Low Gravity</span>}
+              {(stagingRoom.mutators.botsCount ?? 0) > 0 && (
+                <span>
+                  {stagingRoom.mutators.botsCount} Bots ({stagingRoom.mutators.botDifficulty})
+                </span>
+              )}
             </div>
 
-            <div className="bg-[#090d14] border border-slate-800 rounded-lg p-3 space-y-2 max-h-60 overflow-y-auto">
-              <div className="text-[11px] font-mono uppercase text-slate-400 flex items-center gap-1.5">
+            <div className="bg-[#05070a] border border-slate-800 p-3 space-y-2 max-h-60 overflow-y-auto rounded-xl">
+              <div className="text-[11px] font-mono-tabular uppercase text-slate-400 flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5" /> Connected Operatives ({stagingPlayers.length}/{stagingRoom.maxPlayers})
               </div>
               {stagingPlayers.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center justify-between px-3 py-2 rounded bg-[#111620] border border-slate-800 text-xs"
+                  className="flex items-center justify-between px-3 py-2 bg-[#080b12] border border-slate-800 text-xs rounded-lg"
                 >
                   <span className="font-semibold text-white flex items-center gap-2">
                     {p.id === stagingRoom.hostId && <Shield className="w-3.5 h-3.5 text-amber-400" />}
                     {p.username}
-                    <span className="font-mono text-[10px] uppercase text-slate-400">{p.team}</span>
+                    <span className="font-mono-tabular text-[10px] uppercase text-slate-400">{p.team}</span>
                   </span>
                   {stagingRoom.hostId === profile.id && p.id !== profile.id && !p.isBot && (
                     <button
                       type="button"
                       onClick={() => onKickPlayer(p.id)}
-                      className="px-2 py-0.5 rounded bg-rose-600/25 text-rose-300 text-[11px] cursor-pointer"
+                      className="px-2 py-0.5 bg-rose-600/25 text-rose-300 text-[11px] cursor-pointer rounded"
                     >
                       Kick
                     </button>
@@ -396,62 +496,33 @@ export function LobbyWorkspace({
                 </div>
               ))}
             </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">
-                Share code <span className="font-mono text-amber-400">{stagingRoom.roomCode}</span> for friends to join.
-              </span>
-              {stagingRoom.hostId === profile.id ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    audioEngine.playUiClick(820);
-                    onStartPrivateMatch();
-                  }}
-                  className="px-6 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-sm uppercase tracking-wider cursor-pointer"
-                >
-                  Deploy Match
-                </button>
-              ) : (
-                <span className="text-xs font-mono text-sky-400">Waiting for host to launch...</span>
-              )}
-            </div>
           </div>
-        </div>
+        </ModalShell>
       )}
 
       {/* News & Patch Notes Modal */}
       {newsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl max-h-[82vh] bg-[#111620] border border-slate-700 rounded-xl flex flex-col overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-              <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
-                <Newspaper className="w-5 h-5 text-amber-400" /> Strikeline Dispatches & Patch Notes
-              </h2>
-              <button
-                type="button"
-                onClick={() => setNewsOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-5 overflow-y-auto space-y-4">
-              {news.map((item) => (
-                <article key={item.id} className="p-4 rounded-lg bg-[#090d14] border border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="text-amber-400 uppercase">
-                      {item.category} · {item.version}
-                    </span>
-                    <span className="text-slate-500">{new Date(item.publishedAt).toLocaleDateString()}</span>
-                  </div>
-                  <h3 className="font-display font-bold text-base text-white">{item.title}</h3>
-                  <p className="text-xs text-slate-300 leading-relaxed">{item.body}</p>
-                </article>
-              ))}
-            </div>
+        <ModalShell
+          title="Strikeline Dispatches & Patch Notes"
+          icon={<Newspaper className="w-5 h-5 text-amber-400" />}
+          maxWidthClass="max-w-2xl"
+          onClose={() => setNewsOpen(false)}
+        >
+          <div className="space-y-3">
+            {news.map((item) => (
+              <article key={item.id} className="p-4 bg-[#05070a] border border-slate-800 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-mono-tabular">
+                  <span className="text-amber-400 uppercase">
+                    {item.category} · {item.version}
+                  </span>
+                  <span className="text-slate-500">{new Date(item.publishedAt).toLocaleDateString()}</span>
+                </div>
+                <h3 className="font-display font-bold text-base text-white">{item.title}</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">{item.body}</p>
+              </article>
+            ))}
           </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );

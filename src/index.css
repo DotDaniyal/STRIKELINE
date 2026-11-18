@@ -6,6 +6,29 @@
     --font-display: 'Chakra Petch', sans-serif;
     --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
+
+    /* STRIKELINE Tactical Design Tokens */
+    --sl-bg-obsidian: #07090e;
+    --sl-bg-canvas: #0b0e14;
+    --sl-bg-surface: #0f141e;
+    --sl-bg-elevated: #151c2a;
+    --sl-bg-inset: #080b11;
+
+    --sl-border-subtle: rgba(148, 163, 184, 0.14);
+    --sl-border-strong: rgba(148, 163, 184, 0.28);
+    --sl-border-amber: rgba(245, 158, 11, 0.55);
+
+    --sl-text-primary: #f8fafc;
+    --sl-text-secondary: #94a3b8;
+    --sl-text-muted: #64748b;
+
+    --sl-amber: #f59e0b;
+    --sl-amber-bright: #fbbf24;
+    --sl-cyan: #38bdf8;
+    --sl-rose: #f43f5e;
+    --sl-emerald: #10b981;
+
+    --sl-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   html,
@@ -16,10 +39,15 @@
     margin: 0;
     padding: 0;
     font-family: var(--font-sans);
-    background-color: #0b0e14;
-    color: #f1f5f9;
+    background-color: var(--sl-bg-obsidian);
+    color: var(--sl-text-primary);
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--sl-amber);
+    outline-offset: 2px;
   }
 }
 
@@ -36,19 +64,82 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom subtle scrollbars for lobby panels */
+/* Signature Tactical Chamfered Geometry */
+.sl-chamfer {
+  clip-path: polygon(
+    0 10px,
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%
+  );
+}
+
+.sl-chamfer-sm {
+  clip-path: polygon(
+    0 6px,
+    6px 0,
+    100% 0,
+    100% calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    0 100%
+  );
+}
+
+/* Precision Architectural Micro-Grid */
+.sl-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Low-HP Edge Pulse */
+@keyframes slLowHpPulse {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.78;
+  }
+}
+
+.sl-low-hp-vignette {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(244, 63, 94, 0) 48%,
+    rgba(225, 29, 72, 0.42) 100%
+  );
+  animation: slLowHpPulse 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-low-hp-vignette {
+    animation: none;
+    opacity: 0.55;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Custom subtle scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f141d;
+  background: #090d14;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #283344;
-  border-radius: 3px;
+  background: #243042;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

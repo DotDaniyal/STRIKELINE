@@ -4,7 +4,7 @@ import http from 'http';
 import path from 'path';
 import { WebSocketServer } from 'ws';
 import { createServer as createViteServer } from 'vite';
-import { initDatabase, persistNow } from './server/database/db.ts';
+import { initDatabase, persistNow } from './server/persistence/index.ts';
 import { RoomManager } from './server/game/RoomManager.ts';
 import { createApiRouter } from './server/api/routes.ts';
 

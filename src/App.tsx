@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { MotionConfig } from 'motion/react';
 import { Mic, MicOff, X } from 'lucide-react';
 import type {
   ChatMessage,
@@ -6,7 +7,6 @@ import type {
   GameModeId,
   KillFeedEntry,
   MapId,
-  MatchMutators,
   MatchResultSummary,
   MatchSummaryInfo,
   ObjectiveRuntimeState,
@@ -14,7 +14,6 @@ import type {
   PartyState,
   PlayerSettings,
   PlayerSnapshot,
-  RegionId,
   ServerMessage,
   TeamId,
   UserProfile,
@@ -22,13 +21,19 @@ import type {
 import { DEFAULT_SETTINGS } from '../shared/constants/modes.ts';
 import { api, getAuthToken, setAuthToken } from './services/api.ts';
 import { socketClient } from './network/SocketClient.ts';
+import { VoiceChatManager } from './network/VoiceChat.ts';
 import { GameEngine, type HudTelemetry } from './game/engine/GameEngine.ts';
 import { audioEngine } from './game/audio/AudioEngine.ts';
+import { BootSplash } from './components/ui/BootSplash.tsx';
+import { ModalShell } from './components/ui/ModalShell.tsx';
+import { TacticalButton } from './components/ui/TacticalButton.tsx';
 import { TitleAuthScreen } from './components/TitleAuthScreen.tsx';
 import { LobbyWorkspace } from './components/LobbyWorkspace.tsx';
-import { MatchHud } from './components/MatchHud.tsx';
+import { MatchHud } from './components/hud/MatchHud.tsx';
 import { MobileControls } from './components/MobileControls.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
+import { LegalDocumentView, type LegalDocType } from './components/LegalDocumentModal.tsx';
+import { CinematicIntroOverlay } from './components/CinematicIntroOverlay.tsx';
 
 const INITIAL_HUD: HudTelemetry = {
   hp: 100,
@@ -37,20 +42,39 @@ const INITIAL_HUD: HudTelemetry = {
   magSize: 30,
   reserve: 150,
   weaponId: 'vanguard_ar',
+  primaryWeapon: 'vanguard_ar',
+  secondaryWeapon: 'viper_pistol',
   isReloading: false,
+  reloadProgress: 0,
   isAds: false,
   spreadRad: 0.02,
   fps: 60,
   pingMs: 12,
   pointerLocked: false,
   spectatingName: null,
+  pos: { x: 0, y: 0, z: 0 },
+  yaw: 0,
+  movementState: 'idle',
 };
+
+function readLegalPath(): LegalDocType | null {
+  if (typeof window === 'undefined') return null;
+  if (window.location.pathname === '/privacy') return 'privacy';
+  if (window.location.pathname === '/terms') return 'terms';
+  return null;
+}
 
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [screen, setScreen] = useState<'auth' | 'lobby' | 'match'>('auth');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showIntro, setShowIntro] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return !sessionStorage.getItem('strikeline_intro_seen');
+  });
+  const [legalDoc, setLegalDoc] = useState<LegalDocType | null>(() => readLegalPath());
+  const [legalStandalone, setLegalStandalone] = useState<boolean>(() => readLegalPath() !== null);
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
 
   // Lobby / Social / Queue state
@@ -93,8 +117,15 @@ export default function App() {
 
   // Optional WebRTC Team Voice Chat
   const [voiceActive, setVoiceActive] = useState(false);
-  const voiceStreamRef = useRef<MediaStream | null>(null);
-  const voicePeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const profileRef = useRef<UserProfile | null>(null);
+  profileRef.current = profile;
+
+  const voiceManagerRef = useRef<VoiceChatManager | null>(null);
+  if (!voiceManagerRef.current) {
+    voiceManagerRef.current = new VoiceChatManager(
+      () => profileRef.current?.settings.voiceVolume ?? 0.85
+    );
+  }
 
   const gameCanvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -102,12 +133,48 @@ export default function App() {
   const hitmarkerTimerRef = useRef<number | null>(null);
   const damageTimerRef = useRef<number | null>(null);
   const streakTimerRef = useRef<number | null>(null);
-  const profileRef = useRef<UserProfile | null>(null);
-  profileRef.current = profile;
+  const toastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hitmarkerTimerRef.current) window.clearTimeout(hitmarkerTimerRef.current);
+      if (damageTimerRef.current) window.clearTimeout(damageTimerRef.current);
+      if (streakTimerRef.current) window.clearTimeout(streakTimerRef.current);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const showToast = useCallback((title: string, body: string) => {
     setToast({ title, body });
-    window.setTimeout(() => setToast(null), 4000);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  const openLegal = useCallback((doc: LegalDocType, standalone = false) => {
+    setLegalDoc(doc);
+    setLegalStandalone(standalone);
+    const targetPath = doc === 'privacy' ? '/privacy' : '/terms';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ legalDoc: doc }, '', targetPath);
+    }
+  }, []);
+
+  const closeLegal = useCallback(() => {
+    setLegalDoc(null);
+    setLegalStandalone(false);
+    if (window.location.pathname === '/privacy' || window.location.pathname === '/terms') {
+      window.history.pushState({}, '', '/');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const pathDoc = readLegalPath();
+      setLegalDoc(pathDoc);
+      setLegalStandalone(pathDoc !== null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   // Restore session on startup
@@ -141,39 +208,9 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [deathInfo !== null]);
 
-  // WebRTC voice signaling cleanup helper
   const stopVoice = useCallback(() => {
-    voiceStreamRef.current?.getTracks().forEach((t) => t.stop());
-    voiceStreamRef.current = null;
-    for (const pc of voicePeersRef.current.values()) pc.close();
-    voicePeersRef.current.clear();
+    voiceManagerRef.current?.stop();
     setVoiceActive(false);
-  }, []);
-
-  const createVoicePeer = useCallback(async (peerId: string, initiator: boolean) => {
-    if (!voiceStreamRef.current) return null;
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    voicePeersRef.current.set(peerId, pc);
-    voiceStreamRef.current.getTracks().forEach((tr) => pc.addTrack(tr, voiceStreamRef.current!));
-
-    pc.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        socketClient.send({ type: 'voice_signal', targetId: peerId, signal: { candidate: ev.candidate } });
-      }
-    };
-    pc.ontrack = (ev) => {
-      const audio = new Audio();
-      audio.srcObject = ev.streams[0];
-      audio.volume = profileRef.current?.settings.voiceVolume ?? 0.85;
-      audio.play().catch(() => {});
-    };
-
-    if (initiator) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketClient.send({ type: 'voice_signal', targetId: peerId, signal: { sdp: offer } });
-    }
-    return pc;
   }, []);
 
   const toggleVoiceChat = async () => {
@@ -181,17 +218,11 @@ export default function App() {
       stopVoice();
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      voiceStreamRef.current = stream;
+    const ok = await voiceManagerRef.current!.start(matchPlayers, localId, localTeam);
+    if (ok) {
       setVoiceActive(true);
-      for (const p of matchPlayers) {
-        if (p.id !== localId && !p.isBot && (localTeam === 'none' || p.team === localTeam)) {
-          await createVoicePeer(p.id, true);
-        }
-      }
       showToast('Voice Channel Active', 'Microphone linked to squad channel.');
-    } catch {
+    } else {
       showToast('Microphone Unavailable', 'Allow browser microphone access to enable team voice.');
     }
   };
@@ -233,6 +264,7 @@ export default function App() {
             pendingAutoStartBotsRef.current = false;
             socketClient.send({ type: 'start_private_match' });
           } else if (msg.match.state !== 'waiting') {
+            audioEngine.playMatchStart();
             setScreen('match');
           }
           break;
@@ -324,31 +356,15 @@ export default function App() {
         case 'chat_message':
           setChatMessages((prev) => [...prev.slice(-39), msg.message]);
           break;
-        case 'voice_signal': {
-          const sig = msg.signal as { sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit };
-          let pc = voicePeersRef.current.get(msg.fromId) ?? null;
-          if (!pc && voiceStreamRef.current) {
-            pc = await createVoicePeer(msg.fromId, false);
-          }
-          if (!pc) break;
-          if (sig.sdp) {
-            await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
-            if (sig.sdp.type === 'offer') {
-              const ans = await pc.createAnswer();
-              await pc.setLocalDescription(ans);
-              socketClient.send({ type: 'voice_signal', targetId: msg.fromId, signal: { sdp: ans } });
-            }
-          } else if (sig.candidate) {
-            await pc.addIceCandidate(new RTCIceCandidate(sig.candidate));
-          }
+        case 'voice_signal':
+          await voiceManagerRef.current?.handleSignal(msg.fromId, msg.signal);
           break;
-        }
       }
     });
     return () => {
       unsub();
     };
-  }, [localId, localTeam, matchPlayers, showToast, stopVoice, createVoicePeer]);
+  }, [localId, matchPlayers, showToast, stopVoice]);
 
   // Mount & clean up GameEngine when entering/leaving 'match' screen
   useEffect(() => {
@@ -434,257 +450,278 @@ export default function App() {
     }
     setAuthToken(null);
     socketClient.disconnect();
+    audioEngine.setAmbientMode('off');
     stopVoice();
     setProfile(null);
     setScreen('auth');
   };
 
+  if (legalDoc && legalStandalone) {
+    return (
+      <MotionConfig reducedMotion="user">
+        <LegalDocumentView
+          doc={legalDoc}
+          standalone
+          onSwitchDoc={(next) => openLegal(next, true)}
+          onClose={closeLegal}
+        />
+      </MotionConfig>
+    );
+  }
+
   if (booting) {
     return (
-      <div className="min-h-screen bg-[#080a0f] flex items-center justify-center text-slate-300 font-display uppercase tracking-widest text-sm">
-        Initializing Strikeline Combat Systems...
-      </div>
+      <MotionConfig reducedMotion="user">
+        <BootSplash />
+      </MotionConfig>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#080a0f] text-slate-100 select-none">
-      {/* Global Toast Notification */}
-      {toast && (
-        <div className="fixed top-4 right-4 z-50 max-w-sm bg-[#111620] border border-amber-500/50 rounded-xl px-4 py-3 shadow-2xl flex items-start justify-between gap-3">
-          <div>
-            <div className="font-display font-bold text-xs uppercase text-amber-400">{toast.title}</div>
-            <div className="text-xs text-slate-200 mt-0.5">{toast.body}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="text-slate-400 hover:text-white cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Auth / Title Screen */}
-      {screen === 'auth' || !profile ? (
-        <TitleAuthScreen
-          onAuthenticated={(p, token) => {
-            setProfile(p);
-            setLocalId(p.id);
-            audioEngine.applySettings(p.settings || DEFAULT_SETTINGS);
-            socketClient.connect(token);
-            setScreen('lobby');
-          }}
-        />
-      ) : null}
-
-      {/* Lobby Workspace */}
-      {screen === 'lobby' && profile && (
-        <LobbyWorkspace
-          profile={profile}
-          party={party}
-          partyInvite={partyInvite}
-          searching={searching}
-          stagingRoom={activeMatch}
-          stagingPlayers={matchPlayers}
-          onProfileUpdated={(next) => {
-            setProfile(next);
-            const loadout = next.loadouts.find((l) => l.id === next.activeLoadoutId) || next.loadouts[0];
-            if (loadout) {
-              engineRef.current?.updateLoadout(
-                loadout.primaryWeapon,
-                loadout.secondaryWeapon,
-                loadout.weaponSkins,
-                next.equippedSpray
-              );
-            }
-          }}
-          onLogout={handleLogout}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onQuickPlay={(mode, mapId, region, ranked) => {
-            pendingAutoStartBotsRef.current = false;
-            socketClient.send({ type: 'queue_join', mode, mapId, region, ranked });
-          }}
-          onCancelQueue={() => socketClient.send({ type: 'queue_leave' })}
-          onCreatePrivate={(mode, mapId, maxPlayers, password, mutators, autoStartBots) => {
-            pendingAutoStartBotsRef.current = Boolean(autoStartBots);
-            socketClient.send({
-              type: 'create_private_room',
-              mode,
-              mapId,
-              maxPlayers,
-              password: password || undefined,
-              mutators,
-            });
-          }}
-          onJoinRoom={(roomCode, roomId, password) =>
-            socketClient.send({ type: 'join_room', roomCode, roomId, password })
-          }
-          onStartPrivateMatch={() => socketClient.send({ type: 'start_private_match' })}
-          onLeaveRoom={() => socketClient.send({ type: 'leave_room' })}
-          onKickPlayer={(targetId) => socketClient.send({ type: 'kick_player', targetId })}
-          onEnterTraining={() => {
-            setIsTraining(true);
-            setActiveMatch(null);
-            setMatchPlayers([]);
-            setObjectives([]);
-            setFlags([]);
-            setMatchResult(null);
-            setScreen('match');
-          }}
-          onCreateParty={() => socketClient.send({ type: 'party_create' })}
-          onLeaveParty={() => socketClient.send({ type: 'party_leave' })}
-          onInviteParty={(targetUserId) => socketClient.send({ type: 'party_invite', targetUserId })}
-          onRespondPartyInvite={(inviteId, accept) => {
-            socketClient.send({ type: 'party_respond_invite', inviteId, accept });
-            setPartyInvite(null);
-          }}
-          onKickParty={(targetUserId) => socketClient.send({ type: 'party_kick', targetUserId })}
-          onPromoteParty={(targetUserId) =>
-            socketClient.send({ type: 'party_transfer_leader', targetUserId })
-          }
-        />
-      )}
-
-      {/* Active 3D Match / Training Viewport */}
-      {screen === 'match' && profile && (
-        <div className="fixed inset-0 bg-black overflow-hidden">
-          <div ref={gameCanvasRef} className="fixed inset-0 z-0" />
-
-          {/* Team Voice Chat Toggle Button (top-right below killfeed area) */}
-          {!isTraining && (
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen bg-[#07090e] text-slate-100 select-none">
+        {toast && (
+          <div className="fixed top-4 right-4 z-50 max-w-sm bg-[#0c1018] border border-amber-500/55 sl-chamfer-sm px-4 py-3 shadow-2xl flex items-start justify-between gap-3">
+            <div>
+              <div className="font-display font-bold text-xs uppercase tracking-wider text-amber-400">
+                {toast.title}
+              </div>
+              <div className="text-xs text-slate-200 mt-0.5">{toast.body}</div>
+            </div>
             <button
               type="button"
-              onClick={toggleVoiceChat}
-              className={`fixed bottom-24 left-5 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
-                voiceActive
-                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
-                  : 'bg-[#0c1017]/90 border-slate-700 text-slate-300 hover:text-white'
-              }`}
+              aria-label="Dismiss notification"
+              onClick={() => setToast(null)}
+              className="text-slate-400 hover:text-white cursor-pointer"
             >
-              {voiceActive ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-              {voiceActive ? 'Voice On' : 'Voice Off'}
+              <X className="w-4 h-4" />
             </button>
-          )}
+          </div>
+        )}
 
-          <MatchHud
-            hud={hud}
-            match={activeMatch}
-            players={matchPlayers}
-            objectives={objectives}
-            flags={flags}
-            killFeed={killFeed}
-            chatMessages={chatMessages}
-            settings={profile.settings}
-            hitmarker={hitmarker}
-            damageFlashAngle={damageFlashAngle}
-            deathInfo={deathInfo}
-            streakBanner={streakBanner}
-            paused={paused}
-            showScoreboard={showScoreboard}
-            chatOpen={chatOpen}
-            matchResult={matchResult}
-            localId={profile.id}
-            localTeam={localTeam}
-            touchMode={touchMode}
-            onToggleTouchMode={() => setTouchMode((v) => !v)}
-            onResume={() => {
-              setPaused(false);
-              engineRef.current?.setPaused(false);
-              engineRef.current?.requestPointerLock();
+        {screen === 'auth' || !profile ? (
+          <TitleAuthScreen
+            onAuthenticated={(p, token) => {
+              setProfile(p);
+              setLocalId(p.id);
+              audioEngine.applySettings(p.settings || DEFAULT_SETTINGS);
+              socketClient.connect(token);
+              setScreen('lobby');
             }}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onLeaveMatch={handleLeaveMatch}
-            onSendChat={(channel, text) => socketClient.send({ type: 'chat_send', channel, text })}
-            onCloseChat={() => {
-              setChatOpen({ open: false, teamOnly: false });
-              engineRef.current?.setPaused(false);
-            }}
-            onVoteMap={(mapId) => socketClient.send({ type: 'vote_map', mapId })}
-            onStartDrill={(drill) => engineRef.current?.startAimDrill(drill)}
-            onReportPlayer={(username) => {
-              setPaused(true);
-              engineRef.current?.setPaused(true);
-              setReportTarget(username);
-            }}
-            onLockPointer={() => engineRef.current?.requestPointerLock()}
+            onOpenLegal={(doc) => openLegal(doc, false)}
           />
+        ) : null}
 
-          {touchMode && !paused && !matchResult && (
-            <MobileControls engine={engineRef.current} scale={profile.settings.mobileLayoutScale} />
-          )}
+        {screen === 'lobby' && profile && (
+          <LobbyWorkspace
+            profile={profile}
+            party={party}
+            partyInvite={partyInvite}
+            searching={searching}
+            stagingRoom={activeMatch}
+            stagingPlayers={matchPlayers}
+            onProfileUpdated={(next) => {
+              setProfile(next);
+              const loadout = next.loadouts.find((l) => l.id === next.activeLoadoutId) || next.loadouts[0];
+              if (loadout) {
+                engineRef.current?.updateLoadout(
+                  loadout.primaryWeapon,
+                  loadout.secondaryWeapon,
+                  loadout.weaponSkins,
+                  next.equippedSpray
+                );
+              }
+            }}
+            onLogout={handleLogout}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onQuickPlay={(mode, mapId, region, ranked) => {
+              pendingAutoStartBotsRef.current = false;
+              socketClient.send({ type: 'queue_join', mode, mapId, region, ranked });
+            }}
+            onCancelQueue={() => socketClient.send({ type: 'queue_leave' })}
+            onCreatePrivate={(mode, mapId, maxPlayers, password, mutators, autoStartBots) => {
+              pendingAutoStartBotsRef.current = Boolean(autoStartBots);
+              socketClient.send({
+                type: 'create_private_room',
+                mode,
+                mapId,
+                maxPlayers,
+                password: password || undefined,
+                mutators,
+              });
+            }}
+            onJoinRoom={(roomCode, roomId, password) =>
+              socketClient.send({ type: 'join_room', roomCode, roomId, password })
+            }
+            onStartPrivateMatch={() => socketClient.send({ type: 'start_private_match' })}
+            onLeaveRoom={() => socketClient.send({ type: 'leave_room' })}
+            onKickPlayer={(targetId) => socketClient.send({ type: 'kick_player', targetId })}
+            onEnterTraining={() => {
+              audioEngine.playMatchStart();
+              setIsTraining(true);
+              setActiveMatch(null);
+              setMatchPlayers([]);
+              setObjectives([]);
+              setFlags([]);
+              setMatchResult(null);
+              setScreen('match');
+            }}
+            onCreateParty={() => socketClient.send({ type: 'party_create' })}
+            onLeaveParty={() => socketClient.send({ type: 'party_leave' })}
+            onInviteParty={(targetUserId) => socketClient.send({ type: 'party_invite', targetUserId })}
+            onRespondPartyInvite={(inviteId, accept) => {
+              socketClient.send({ type: 'party_respond_invite', inviteId, accept });
+              setPartyInvite(null);
+            }}
+            onKickParty={(targetUserId) => socketClient.send({ type: 'party_kick', targetUserId })}
+            onPromoteParty={(targetUserId) =>
+              socketClient.send({ type: 'party_transfer_leader', targetUserId })
+            }
+            onOpenLegal={(doc) => openLegal(doc, false)}
+          />
+        )}
 
-          {/* In-Match Player Report Modal */}
-          {reportTarget && (
-            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-              <form
-                onSubmit={async (e: FormEvent) => {
-                  e.preventDefault();
-                  await api.submitReport(reportTarget, reportReason, reportDetails);
-                  setReportTarget(null);
-                  setReportDetails('');
-                  showToast('Report Filed', `Submitted report for ${reportTarget}.`);
-                }}
-                className="w-full max-w-md bg-[#111620] border border-slate-700 rounded-xl p-5 space-y-3"
+        {screen === 'match' && profile && (
+          <div className="fixed inset-0 bg-black overflow-hidden">
+            <div ref={gameCanvasRef} className="fixed inset-0 z-0" />
+
+            {!isTraining && (
+              <button
+                type="button"
+                onClick={toggleVoiceChat}
+                className={`fixed bottom-20 sm:bottom-24 left-3 sm:left-5 z-30 flex items-center gap-1.5 px-3 py-1.5 sl-chamfer-sm border text-xs font-semibold cursor-pointer ${
+                  voiceActive
+                    ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                    : 'bg-[#07090e]/90 border-slate-700 text-slate-300 hover:text-white'
+                }`}
               >
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display font-bold text-base text-white">
-                    Report Operator: {reportTarget}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setReportTarget(null)}
-                    className="text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <select
-                  value={reportReason}
-                  onChange={(e) => setReportReason(e.target.value)}
-                  className="w-full bg-[#090d14] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                >
-                  <option>Cheating / Exploit</option>
-                  <option>Harassment / Chat Abuse</option>
-                  <option>Griefing / AFK</option>
-                </select>
-                <textarea
-                  rows={3}
-                  value={reportDetails}
-                  onChange={(e) => setReportDetails(e.target.value)}
-                  placeholder="Describe incident..."
-                  className="w-full bg-[#090d14] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setReportTarget(null)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs text-slate-300 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-rose-600 text-xs font-bold text-white cursor-pointer"
-                  >
-                    Submit Report
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-        </div>
-      )}
+                {voiceActive ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+                {voiceActive ? 'Voice On' : 'Voice Off'}
+              </button>
+            )}
 
-      {/* Global Settings & Crosshair Studio Modal */}
-      {settingsOpen && profile && (
-        <SettingsModal
-          settings={profile.settings}
-          onSave={handleSaveSettings}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-    </div>
+            <MatchHud
+              hud={hud}
+              match={activeMatch}
+              players={matchPlayers}
+              objectives={objectives}
+              flags={flags}
+              killFeed={killFeed}
+              chatMessages={chatMessages}
+              settings={profile.settings}
+              hitmarker={hitmarker}
+              damageFlashAngle={damageFlashAngle}
+              deathInfo={deathInfo}
+              streakBanner={streakBanner}
+              paused={paused}
+              showScoreboard={showScoreboard}
+              chatOpen={chatOpen}
+              matchResult={matchResult}
+              localId={profile.id}
+              localTeam={localTeam}
+              touchMode={touchMode}
+              onToggleTouchMode={() => setTouchMode((v) => !v)}
+              onResume={() => {
+                setPaused(false);
+                engineRef.current?.setPaused(false);
+                engineRef.current?.requestPointerLock();
+              }}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onLeaveMatch={handleLeaveMatch}
+              onSendChat={(channel, text) => socketClient.send({ type: 'chat_send', channel, text })}
+              onCloseChat={() => {
+                setChatOpen({ open: false, teamOnly: false });
+                engineRef.current?.setPaused(false);
+              }}
+              onVoteMap={(mapId) => socketClient.send({ type: 'vote_map', mapId })}
+              onSwapSlot={(slot) => engineRef.current?.swapToSlot(slot)}
+              onStartDrill={(drill) => engineRef.current?.startAimDrill(drill)}
+              onReportPlayer={(username) => {
+                setPaused(true);
+                engineRef.current?.setPaused(true);
+                setReportTarget(username);
+              }}
+              onLockPointer={() => engineRef.current?.requestPointerLock()}
+            />
+
+            {touchMode && !paused && !matchResult && (
+              <MobileControls engine={engineRef.current} scale={profile.settings.mobileLayoutScale} />
+            )}
+
+            {reportTarget && (
+              <ModalShell
+                title={`Report Operator: ${reportTarget}`}
+                maxWidthClass="max-w-md"
+                onClose={() => setReportTarget(null)}
+              >
+                <form
+                  onSubmit={async (e: FormEvent) => {
+                    e.preventDefault();
+                    await api.submitReport(reportTarget, reportReason, reportDetails);
+                    setReportTarget(null);
+                    setReportDetails('');
+                    showToast('Report Filed', `Submitted report for ${reportTarget}.`);
+                  }}
+                  className="space-y-3"
+                >
+                  <select
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value)}
+                    className="w-full bg-[#07090e] border border-slate-700 px-3 py-2 text-xs text-white"
+                  >
+                    <option>Cheating / Exploit</option>
+                    <option>Harassment / Chat Abuse</option>
+                    <option>Griefing / AFK</option>
+                  </select>
+                  <textarea
+                    rows={3}
+                    value={reportDetails}
+                    onChange={(e) => setReportDetails(e.target.value)}
+                    placeholder="Describe incident..."
+                    className="w-full bg-[#07090e] border border-slate-700 px-3 py-2 text-xs text-white"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <TacticalButton type="button" variant="secondary" onClick={() => setReportTarget(null)}>
+                      Cancel
+                    </TacticalButton>
+                    <TacticalButton type="submit" variant="danger">
+                      Submit Report
+                    </TacticalButton>
+                  </div>
+                </form>
+              </ModalShell>
+            )}
+          </div>
+        )}
+
+        {showIntro && (
+          <CinematicIntroOverlay
+            onComplete={() => {
+              if (typeof window !== 'undefined') {
+                sessionStorage.setItem('strikeline_intro_seen', 'true');
+              }
+              setShowIntro(false);
+            }}
+          />
+        )}
+
+        {settingsOpen && profile && (
+          <SettingsModal
+            settings={profile.settings}
+            onSave={handleSaveSettings}
+            onClose={() => setSettingsOpen(false)}
+            onReplayIntro={() => setShowIntro(true)}
+          />
+        )}
+
+        {legalDoc && !legalStandalone && (
+          <LegalDocumentView
+            doc={legalDoc}
+            onSwitchDoc={(next) => openLegal(next, false)}
+            onClose={closeLegal}
+          />
+        )}
+      </div>
+    </MotionConfig>
   );
 }

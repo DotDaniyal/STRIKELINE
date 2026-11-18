@@ -1,10 +1,17 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { VignetteShader } from 'three/addons/shaders/VignetteShader.js';
 import type {
   FlagRuntimeState,
   GameModeId,
   MapId,
   MatchSummaryInfo,
+  MovementState,
   ObjectiveRuntimeState,
   PlayerSettings,
   PlayerSnapshot,
@@ -14,13 +21,15 @@ import type {
   Vec3,
   WeaponId,
 } from '../../../shared/types/game.ts';
-import { MAPS } from '../../../shared/constants/maps.ts';
+import { MAPS } from '../../../shared/maps/index.ts';
 import { WEAPONS } from '../../../shared/constants/weapons.ts';
 import { buildMapScene, type BuiltMapScene } from '../maps/MapBuilder.ts';
 import { buildWeaponModel, type WeaponViewModel } from '../models/WeaponModels.ts';
 import { OperatorRig } from '../models/OperatorModel.ts';
-import { PlayerController } from '../physics/PlayerController.ts';
-import { getSprayTexture } from './Textures.ts';
+import { PlayerController } from '../player/PlayerController.ts';
+import { CombatVfxManager } from './CombatVfx.ts';
+import { ObjectiveSyncManager } from './ObjectiveSync.ts';
+import { TrainingRangeManager, type RangeHudStats } from './TrainingRangeManager.ts';
 import { detectSoftwareWebGL } from './LobbyScene.ts';
 import { audioEngine } from '../audio/AudioEngine.ts';
 import { socketClient } from '../../network/SocketClient.ts';
@@ -32,32 +41,6 @@ const _dir = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _raycaster = new THREE.Raycaster();
 
-interface TracerItem {
-  line: THREE.Line;
-  mat: THREE.LineBasicMaterial;
-  life: number;
-}
-
-interface SparkItem {
-  mesh: THREE.Mesh;
-  vel: THREE.Vector3;
-  life: number;
-}
-
-interface RangeTarget {
-  id: string;
-  group: THREE.Group;
-  headMesh: THREE.Mesh;
-  bodyMesh: THREE.Mesh;
-  baseX: number;
-  baseZ: number;
-  moving: boolean;
-  speed: number;
-  phase: number;
-  hp: number;
-  respawnAt: number;
-}
-
 export interface HudTelemetry {
   hp: number;
   maxHp: number;
@@ -65,22 +48,20 @@ export interface HudTelemetry {
   magSize: number;
   reserve: number;
   weaponId: WeaponId;
+  primaryWeapon: WeaponId;
+  secondaryWeapon: WeaponId;
   isReloading: boolean;
+  reloadProgress: number;
   isAds: boolean;
   spreadRad: number;
   fps: number;
   pingMs: number;
   pointerLocked: boolean;
   spectatingName: string | null;
-  rangeStats?: {
-    hits: number;
-    shots: number;
-    headshots: number;
-    targetsDown: number;
-    drillMode: 'free' | 'flick' | 'tracking';
-    drillScore: number;
-    drillTimeLeft: number;
-  };
+  pos: Vec3;
+  yaw: number;
+  movementState: MovementState;
+  rangeStats?: RangeHudStats;
 }
 
 interface RemoteActor {
@@ -95,9 +76,18 @@ export class GameEngine {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private envTexture: THREE.Texture | null = null;
+  private dustPoints: THREE.Points | null = null;
+  private dustPositions: Float32Array | null = null;
+  private dustGeo: THREE.BufferGeometry | null = null;
+  private dustMat: THREE.PointsMaterial | null = null;
+
   private isSoftwareGl: boolean;
   private frameId = 0;
   private disposed = false;
+  private contextLost = false;
   private clock = new THREE.Clock();
 
   private mapId: MapId;
@@ -105,6 +95,9 @@ export class GameEngine {
   private builtMap: BuiltMapScene | null = null;
   private destructibles = new Map<string, number>();
   private controller: PlayerController;
+  private vfx: CombatVfxManager;
+  private objectiveSync: ObjectiveSyncManager;
+  private trainingRange: TrainingRangeManager;
 
   // Lighting refs
   private keyLight: THREE.DirectionalLight;
@@ -120,6 +113,7 @@ export class GameEngine {
   private weaponSkins: Partial<Record<WeaponId, string>> = {};
   private ammoState = new Map<WeaponId, { mag: number; reserve: number }>();
   private isReloading = false;
+  private reloadStartedAt = 0;
   private reloadEndsAt = 0;
   private isAds = false;
   private isFiring = false;
@@ -130,6 +124,7 @@ export class GameEngine {
   private inspectUntil = 0;
   private recoilOffsetZ = 0;
   private muzzleFlashTimer = 0;
+  private cameraRoll = 0;
   private lastInputSendAt = 0;
   private inputSeq = 0;
   private sprayCooldownAt = 0;
@@ -145,24 +140,7 @@ export class GameEngine {
   private killerFocusPos: Vec3 | null = null;
   private killerFocusUntil = 0;
 
-  // Remote actors, pooled FX, objectives, sprays, training range
   private remotes = new Map<string, RemoteActor>();
-  private tracers: TracerItem[] = [];
-  private sparks: SparkItem[] = [];
-  private objectiveMeshes = new Map<string, THREE.Mesh>();
-  private tagMeshes = new Map<string, THREE.Mesh>();
-  private flagMeshes = new Map<string, THREE.Group>();
-  private sprayMeshes: THREE.Mesh[] = [];
-  private rangeTargets: RangeTarget[] = [];
-  private rangeHits = 0;
-  private rangeShots = 0;
-  private rangeHeadshots = 0;
-  private rangeTargetsDown = 0;
-  private drillMode: 'free' | 'flick' | 'tracking' = 'free';
-  private drillScore = 0;
-  private drillEndsAt = 0;
-
-  // Mobile touch look / crouch state
   private touchCrouch = false;
   private pointerLocked = false;
   private fpsSamples: number[] = [];
@@ -227,7 +205,8 @@ export class GameEngine {
 
     this.scene = new THREE.Scene();
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = this.envTexture;
     pmrem.dispose();
 
     this.camera = new THREE.PerspectiveCamera(
@@ -239,13 +218,11 @@ export class GameEngine {
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
-    // Attach weapon viewmodel & muzzle point light to camera
     this.camera.add(this.weaponMount);
     this.muzzleLight = new THREE.PointLight('#fbbf24', 0, 6);
     this.muzzleLight.position.set(0.18, -0.1, -0.7);
     this.camera.add(this.muzzleLight);
 
-    // Lights
     this.hemiLight = new THREE.HemisphereLight('#94a3b8', '#334155', 0.9);
     this.scene.add(this.hemiLight);
     this.keyLight = new THREE.DirectionalLight('#fff5e0', 2.0);
@@ -261,22 +238,88 @@ export class GameEngine {
 
     const mapDef = MAPS[this.mapId];
     this.controller = new PlayerController(mapDef, this.destructibles);
+    this.vfx = new CombatVfxManager(this.scene, this.isSoftwareGl);
+    this.objectiveSync = new ObjectiveSyncManager(this.scene);
+    this.trainingRange = new TrainingRangeManager(this.scene);
+
     this.resetAmmo();
     this.loadMap(this.mapId);
     this.equipWeapon(this.currentWeapon);
 
     if (this.mode === 'training') {
-      this.spawnTrainingTargets();
+      this.trainingRange.spawnTargets();
+    }
+
+    if (!this.isSoftwareGl) {
+      this.initAmbientDust();
+      if (this.settings.bloom) {
+        this.initPostProcessing();
+      }
     }
 
     this.bindEvents();
     audioEngine.applySettings(this.settings);
+    audioEngine.setAmbientMode('match');
 
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
     }
 
     this.tick();
+  }
+
+  private initPostProcessing() {
+    if (this.composer || this.isSoftwareGl) return;
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    const composer = new EffectComposer(this.renderer);
+    composer.addPass(new RenderPass(this.scene, this.camera));
+
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(Math.max(1, Math.floor(w / 2)), Math.max(1, Math.floor(h / 2))),
+      0.32,
+      0.35,
+      0.88
+    );
+    composer.addPass(bloom);
+
+    const vignette = new ShaderPass(VignetteShader);
+    vignette.uniforms['offset'].value = 1.05;
+    vignette.uniforms['darkness'].value = 0.92;
+    composer.addPass(vignette);
+
+    composer.addPass(new OutputPass());
+    this.composer = composer;
+    this.bloomPass = bloom;
+  }
+
+  private disposePostProcessing() {
+    this.bloomPass?.dispose();
+    this.bloomPass = null;
+    this.composer?.dispose();
+    this.composer = null;
+  }
+
+  private initAmbientDust() {
+    const count = 140;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 56;
+      positions[i * 3 + 1] = 0.5 + Math.random() * 8.5;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 56;
+    }
+    this.dustPositions = positions;
+    this.dustGeo = new THREE.BufferGeometry();
+    this.dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.dustMat = new THREE.PointsMaterial({
+      color: '#e2e8f0',
+      size: 0.055,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+    });
+    this.dustPoints = new THREE.Points(this.dustGeo, this.dustMat);
+    this.scene.add(this.dustPoints);
   }
 
   public updateSettings(next: PlayerSettings) {
@@ -290,6 +333,11 @@ export class GameEngine {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * (next.renderScale || 1));
       this.renderer.shadowMap.enabled = next.shadows;
       this.keyLight.castShadow = next.shadows;
+      if (next.bloom && !this.composer) {
+        this.initPostProcessing();
+      } else if (!next.bloom && this.composer) {
+        this.disposePostProcessing();
+      }
     }
   }
 
@@ -363,6 +411,13 @@ export class GameEngine {
     }
   }
 
+  public swapToSlot(slot: 1 | 2) {
+    const target = slot === 1 ? this.primaryWeapon : this.secondaryWeapon;
+    if (this.currentWeapon !== target) {
+      this.equipWeapon(target);
+    }
+  }
+
   public setPaused(paused: boolean) {
     this.paused = paused;
     this.isFiring = false;
@@ -411,80 +466,7 @@ export class GameEngine {
 
   // Training Range Drills
   public startAimDrill(drill: 'free' | 'flick' | 'tracking') {
-    this.drillMode = drill;
-    this.drillScore = 0;
-    this.rangeHits = 0;
-    this.rangeShots = 0;
-    this.rangeHeadshots = 0;
-    this.rangeTargetsDown = 0;
-    this.drillEndsAt = drill === 'free' ? 0 : performance.now() + 30000;
-    this.spawnTrainingTargets();
-  }
-
-  private spawnTrainingTargets() {
-    for (const t of this.rangeTargets) {
-      this.scene.remove(t.group);
-    }
-    this.rangeTargets = [];
-
-    const specs =
-      this.drillMode === 'flick'
-        ? [
-            { x: -7, z: -12, moving: false, speed: 0 },
-            { x: -2.5, z: -15, moving: false, speed: 0 },
-            { x: 2.5, z: -15, moving: false, speed: 0 },
-            { x: 7, z: -12, moving: false, speed: 0 },
-            { x: 0, z: -20, moving: false, speed: 0 },
-          ]
-        : this.drillMode === 'tracking'
-        ? [
-            { x: -4, z: -14, moving: true, speed: 3.4 },
-            { x: 4, z: -22, moving: true, speed: 4.2 },
-            { x: 0, z: -28, moving: true, speed: 4.8 },
-          ]
-        : [
-            { x: -6, z: -8, moving: false, speed: 0 },
-            { x: 0, z: -14, moving: false, speed: 0 },
-            { x: 6, z: -20, moving: false, speed: 0 },
-            { x: -4, z: -24, moving: true, speed: 2.5 },
-            { x: 4, z: -30, moving: true, speed: 3.2 },
-          ];
-
-    specs.forEach((sp, i) => {
-      const grp = new THREE.Group();
-      const postMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.7, roughness: 0.35 });
-      const bodyMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', roughness: 0.4, metalness: 0.25 });
-      const headMat = new THREE.MeshStandardMaterial({
-        color: '#f59e0b',
-        emissive: '#f59e0b',
-        emissiveIntensity: 0.35,
-        roughness: 0.3,
-      });
-
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.9, 10), postMat);
-      post.position.y = 0.45;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.14), bodyMat);
-      body.position.y = 1.15;
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 12), headMat);
-      head.position.y = 1.68;
-      grp.add(post, body, head);
-      grp.position.set(sp.x, 0, sp.z);
-      this.scene.add(grp);
-
-      this.rangeTargets.push({
-        id: `tgt_${i}`,
-        group: grp,
-        headMesh: head,
-        bodyMesh: body,
-        baseX: sp.x,
-        baseZ: sp.z,
-        moving: sp.moving,
-        speed: sp.speed,
-        phase: i * 1.4,
-        hp: 100,
-        respawnAt: 0,
-      });
-    });
+    this.trainingRange.startDrill(drill);
   }
 
   // Server state ingestion
@@ -556,9 +538,7 @@ export class GameEngine {
       }
     }
 
-    this.syncObjectives(msg.objectives);
-    this.syncTags(msg.tags);
-    this.syncFlags(msg.flags);
+    this.objectiveSync.sync(msg.objectives, msg.tags, msg.flags, this.localTeam);
   }
 
   public onPlayerRespawned(x: number, y: number, z: number, yaw: number) {
@@ -602,148 +582,13 @@ export class GameEngine {
     }
     if (!this.settings.showTracers) return;
     for (const end of endPoints) {
-      this.spawnTracer(origin, end, tracerColor);
-      this.spawnSparks(end);
+      this.vfx.spawnTracer(origin, end, tracerColor);
+      this.vfx.spawnSparks(end);
     }
   }
 
   public onSprayPlaced(decal: SprayDecal) {
-    const geo = new THREE.PlaneGeometry(0.9, 0.9);
-    const mat = new THREE.MeshBasicMaterial({
-      map: getSprayTexture(decal.sprayId),
-      transparent: true,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(decal.x + decal.nx * 0.02, decal.y + decal.ny * 0.02, decal.z + decal.nz * 0.02);
-    _v1.set(decal.x + decal.nx, decal.y + decal.ny, decal.z + decal.nz);
-    mesh.lookAt(_v1);
-    this.scene.add(mesh);
-    this.sprayMeshes.push(mesh);
-    if (this.sprayMeshes.length > 24) {
-      const old = this.sprayMeshes.shift()!;
-      this.scene.remove(old);
-      old.geometry.dispose();
-      (old.material as THREE.Material).dispose();
-    }
-  }
-
-  private syncObjectives(objectives: ObjectiveRuntimeState[]) {
-    const activeIds = new Set<string>();
-    for (const o of objectives) {
-      activeIds.add(o.id);
-      let mesh = this.objectiveMeshes.get(o.id);
-      if (!mesh) {
-        const geo = new THREE.CylinderGeometry(o.radius, o.radius, 0.16, 32, 1, true);
-        const mat = new THREE.MeshBasicMaterial({
-          color: '#f59e0b',
-          transparent: true,
-          opacity: 0.48,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        });
-        mesh = new THREE.Mesh(geo, mat);
-        mesh.position.set(o.x, o.y + 0.1, o.z);
-        this.scene.add(mesh);
-        this.objectiveMeshes.set(o.id, mesh);
-      }
-      mesh.visible = o.active;
-      const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.color.set(
-        o.contested ? '#f59e0b' : o.owner === 'alpha' ? '#38bdf8' : o.owner === 'bravo' ? '#f43f5e' : '#eab308'
-      );
-    }
-    for (const [id, m] of this.objectiveMeshes.entries()) {
-      if (!activeIds.has(id)) {
-        this.scene.remove(m);
-        m.geometry.dispose();
-        (m.material as THREE.Material).dispose();
-        this.objectiveMeshes.delete(id);
-      }
-    }
-  }
-
-  private syncTags(tags: TagDrop[]) {
-    const ids = new Set<string>();
-    for (const t of tags) {
-      ids.add(t.id);
-      let m = this.tagMeshes.get(t.id);
-      if (!m) {
-        const geo = new THREE.OctahedronGeometry(0.32, 0);
-        const mat = new THREE.MeshStandardMaterial({
-          color: t.victimTeam === this.localTeam ? '#38bdf8' : '#ef4444',
-          emissive: t.victimTeam === this.localTeam ? '#38bdf8' : '#ef4444',
-          emissiveIntensity: 0.6,
-          metalness: 0.8,
-          roughness: 0.2,
-        });
-        m = new THREE.Mesh(geo, mat);
-        m.position.set(t.x, t.y, t.z);
-        this.scene.add(m);
-        this.tagMeshes.set(t.id, m);
-      }
-    }
-    for (const [id, m] of this.tagMeshes.entries()) {
-      if (!ids.has(id)) {
-        this.scene.remove(m);
-        m.geometry.dispose();
-        (m.material as THREE.Material).dispose();
-        this.tagMeshes.delete(id);
-      }
-    }
-  }
-
-  private syncFlags(flags: FlagRuntimeState[]) {
-    for (const f of flags) {
-      let grp = this.flagMeshes.get(f.team);
-      if (!grp) {
-        grp = new THREE.Group();
-        const color = f.team === 'alpha' ? '#38bdf8' : '#f43f5e';
-        const pole = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.05, 0.05, 2.4, 8),
-          new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.9, roughness: 0.2 })
-        );
-        pole.position.y = 1.2;
-        const banner = new THREE.Mesh(
-          new THREE.BoxGeometry(0.8, 0.5, 0.05),
-          new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.45 })
-        );
-        banner.position.set(0.4, 2.1, 0);
-        grp.add(pole, banner);
-        this.scene.add(grp);
-        this.flagMeshes.set(f.team, grp);
-      }
-      grp.position.set(f.x, f.y, f.z);
-    }
-  }
-
-  private spawnTracer(from: Vec3, to: Vec3, color: string) {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(from.x, from.y, from.z),
-      new THREE.Vector3(to.x, to.y, to.z),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
-    const line = new THREE.Line(geo, mat);
-    this.scene.add(line);
-    this.tracers.push({ line, mat, life: 0.08 });
-  }
-
-  private spawnSparks(at: Vec3) {
-    const count = this.isSoftwareGl ? 2 : 5;
-    for (let i = 0; i < count; i++) {
-      const geo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
-      const mat = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(at.x, at.y, at.z);
-      this.scene.add(mesh);
-      this.sparks.push({
-        mesh,
-        vel: new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 4.5, (Math.random() - 0.5) * 6),
-        life: 0.24,
-      });
-    }
+    this.vfx.placeSpray(decal);
   }
 
   private startReload() {
@@ -754,7 +599,9 @@ export class GameEngine {
 
     this.isReloading = true;
     this.isAds = false;
-    this.reloadEndsAt = performance.now() + w.reloadTimeSec * 1000;
+    const now = performance.now();
+    this.reloadStartedAt = now;
+    this.reloadEndsAt = now + w.reloadTimeSec * 1000;
     audioEngine.playReload();
     if (this.mode !== 'training') {
       socketClient.send({ type: 'player_reload', weaponId: this.currentWeapon });
@@ -802,7 +649,6 @@ export class GameEngine {
     ammo.mag -= 1;
     this.nextFireAt = now + 60000 / w.rpm;
 
-    // Audio & Viewmodel Kick
     audioEngine.playGunshot(w.id, true);
     this.recoilOffsetZ = 0.085;
     this.muzzleFlashTimer = 0.045;
@@ -812,7 +658,6 @@ export class GameEngine {
     const spread = this.computeCurrentSpread();
     this.controller.addRecoil(w.recoilVertical * (this.isAds ? 0.72 : 1), w.recoilHorizontal);
 
-    // Origin & direction
     const camPos = this.camera.getWorldPosition(_v1);
     const camDir = this.camera.getWorldDirection(_v2);
     const origin: Vec3 = { x: camPos.x, y: camPos.y, z: camPos.z };
@@ -830,7 +675,16 @@ export class GameEngine {
     }
 
     if (this.mode === 'training') {
-      this.handleLocalTrainingShot(origin, pelletDirs, w.tracerColor);
+      this.trainingRange.handleShot(
+        this.currentWeapon,
+        origin,
+        pelletDirs,
+        w.tracerColor,
+        this.settings.showTracers,
+        this.builtMap?.raycastTargets ?? [],
+        this.vfx,
+        this.onLocalHitmarker
+      );
     } else {
       socketClient.send({
         type: 'player_shoot',
@@ -845,54 +699,6 @@ export class GameEngine {
     if (ammo.mag === 0) {
       this.startReload();
     }
-  }
-
-  private handleLocalTrainingShot(origin: Vec3, dirs: Vec3[], tracerColor: string) {
-    this.rangeShots += 1;
-    const origVec = new THREE.Vector3(origin.x, origin.y, origin.z);
-    const targets = this.rangeTargets.filter((t) => t.hp > 0);
-    const targetMeshes = targets.flatMap((t) => [t.headMesh, t.bodyMesh]);
-    const allObjects = [...(this.builtMap?.raycastTargets ?? []), ...targetMeshes];
-
-    let anyHit = false;
-    for (const d of dirs) {
-      const dirVec = new THREE.Vector3(d.x, d.y, d.z);
-      _raycaster.set(origVec, dirVec);
-      _raycaster.far = 140;
-      const hits = _raycaster.intersectObjects(allObjects, false);
-      const end = hits[0]
-        ? { x: hits[0].point.x, y: hits[0].point.y, z: hits[0].point.z }
-        : { x: origin.x + d.x * 100, y: origin.y + d.y * 100, z: origin.z + d.z * 100 };
-
-      if (this.settings.showTracers) {
-        this.spawnTracer(origin, end, tracerColor);
-      }
-      this.spawnSparks(end);
-
-      if (hits[0]) {
-        const hitObj = hits[0].object;
-        const tgt = targets.find((t) => t.headMesh === hitObj || t.bodyMesh === hitObj);
-        if (tgt) {
-          anyHit = true;
-          const isHead = tgt.headMesh === hitObj;
-          const w = WEAPONS[this.currentWeapon];
-          const dmg = isHead ? w.damageHead : w.damageBody;
-          tgt.hp = Math.max(0, tgt.hp - dmg);
-          if (isHead) this.rangeHeadshots += 1;
-          const killed = tgt.hp <= 0;
-          audioEngine.playHitmarker(isHead);
-          this.onLocalHitmarker?.(isHead, killed);
-          if (killed) {
-            this.rangeTargetsDown += 1;
-            this.drillScore += isHead ? 150 : 100;
-            tgt.group.visible = false;
-            tgt.respawnAt = performance.now() + 1400;
-            audioEngine.playElimination();
-          }
-        }
-      }
-    }
-    if (anyHit) this.rangeHits += 1;
   }
 
   private trySpray() {
@@ -932,7 +738,24 @@ export class GameEngine {
     this.renderer.domElement.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu);
+    this.renderer.domElement.addEventListener('webglcontextlost', this.onContextLost);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.onContextRestored);
   }
+
+  private onContextLost = (e: Event) => {
+    e.preventDefault();
+    this.contextLost = true;
+    cancelAnimationFrame(this.frameId);
+    clearTimeout(this.frameId);
+  };
+
+  private onContextRestored = () => {
+    this.contextLost = false;
+    if (!this.disposed) {
+      this.clock.getDelta();
+      this.tick();
+    }
+  };
 
   private onContextMenu = (e: MouseEvent) => e.preventDefault();
 
@@ -1007,7 +830,6 @@ export class GameEngine {
 
     if (this.paused) return;
 
-    // Spectate cycle when dead
     if (!this.localAlive && (e.code === 'Space' || e.code === 'KeyD' || e.code === 'KeyA')) {
       this.spectateIndex += 1;
       return;
@@ -1042,6 +864,12 @@ export class GameEngine {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    if (this.composer) {
+      this.composer.setSize(w, h);
+    }
+    if (this.bloomPass) {
+      this.bloomPass.resolution.set(Math.max(1, Math.floor(w / 2)), Math.max(1, Math.floor(h / 2)));
+    }
   };
 
   private afterDraw(cb: () => void) {
@@ -1049,7 +877,7 @@ export class GameEngine {
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
     const poll = () => {
-      if (this.disposed) return;
+      if (this.disposed || this.contextLost) return;
       const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
       if (state === gl.UNSIGNALED) {
         this.frameId = window.setTimeout(poll, 5);
@@ -1062,7 +890,7 @@ export class GameEngine {
   }
 
   private tick = () => {
-    if (this.disposed) return;
+    if (this.disposed || this.contextLost) return;
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const elapsed = this.clock.getElapsedTime();
     const now = performance.now();
@@ -1072,7 +900,6 @@ export class GameEngine {
       if (this.fpsSamples.length > 20) this.fpsSamples.shift();
     }
 
-    // Complete reload
     if (this.isReloading && now >= this.reloadEndsAt) {
       this.isReloading = false;
       const w = WEAPONS[this.currentWeapon];
@@ -1083,7 +910,6 @@ export class GameEngine {
       ammo.reserve -= take;
     }
 
-    // Auto / Burst firing + Gamepad triggers
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = pads[0];
     if (pad) {
@@ -1106,15 +932,18 @@ export class GameEngine {
       this.controller.update(dt, this.settings, wCfg.moveSpeedMultiplier, this.isAds, this.touchCrouch);
       const camOffset = this.controller.getCameraOffset(this.settings);
       this.camera.position.set(camOffset.x, camOffset.y, camOffset.z);
+
+      const targetRoll = this.controller.movementState === 'slide' ? -0.032 : 0;
+      this.cameraRoll = THREE.MathUtils.damp(this.cameraRoll, targetRoll, 12, dt);
+
       _euler.set(
         this.controller.pitch + this.controller.recoilPitch,
         this.controller.yaw + this.controller.recoilYaw,
-        0,
+        this.cameraRoll,
         'YXZ'
       );
       this.camera.quaternion.setFromEuler(_euler);
     } else {
-      // Death / Killcam / Spectator view
       const aliveActors = Array.from(this.remotes.values()).filter((a) => a.snapshot.alive);
       if (this.killerFocusPos && now < this.killerFocusUntil) {
         this.camera.position.set(this.controller.x, this.controller.y + 1.4, this.controller.z);
@@ -1133,18 +962,18 @@ export class GameEngine {
       }
     }
 
-    // Dynamic FOV (ADS + Sprint widen)
     const targetFov = this.isAds
       ? wCfg.adsFov
+      : this.controller.movementState === 'slide'
+      ? Math.min(118, this.settings.fov + 6)
       : this.controller.movementState === 'sprint'
-      ? Math.min(115, this.settings.fov + 5)
+      ? Math.min(115, this.settings.fov + 4.5)
       : this.settings.fov;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, wCfg.adsZoomSpeed, dt);
       this.camera.updateProjectionMatrix();
     }
 
-    // Weapon Viewmodel Animation (ADS, Recoil, Reload, Equip, Inspect, Sprint Tilt)
     this.weaponMount.visible = this.localAlive;
     if (this.localAlive && this.viewModel) {
       const targetX = this.isAds ? 0.0 : 0.22;
@@ -1165,13 +994,17 @@ export class GameEngine {
       this.weaponMount.position.y = THREE.MathUtils.damp(this.weaponMount.position.y, targetY + swayY, 16, dt);
       this.weaponMount.position.z = THREE.MathUtils.damp(this.weaponMount.position.z, targetZ, 18, dt);
 
-      const targetRotY = this.controller.movementState === 'sprint' && !this.isAds ? 0.45 : now < this.inspectUntil ? 0.8 : 0;
+      const targetRotY =
+        this.controller.movementState === 'sprint' && !this.isAds
+          ? 0.45
+          : now < this.inspectUntil
+          ? 0.8
+          : 0;
       const targetRotX = this.isReloading ? -0.45 : this.recoilOffsetZ * 1.8;
       this.weaponMount.rotation.y = THREE.MathUtils.damp(this.weaponMount.rotation.y, targetRotY, 12, dt);
       this.weaponMount.rotation.x = THREE.MathUtils.damp(this.weaponMount.rotation.x, targetRotX, 14, dt);
     }
 
-    // Muzzle flash decay
     if (this.muzzleFlashTimer > 0) {
       this.muzzleFlashTimer -= dt;
       if (this.muzzleFlashTimer <= 0) {
@@ -1180,10 +1013,17 @@ export class GameEngine {
       }
     }
 
-    // Interpolate remote actors
+    if (this.dustPoints && this.dustPositions) {
+      const posAttr = this.dustPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < this.dustPositions.length; i += 3) {
+        this.dustPositions[i + 1] += dt * 0.16;
+        if (this.dustPositions[i + 1] > 9.0) this.dustPositions[i + 1] = 0.5;
+      }
+      posAttr.needsUpdate = true;
+    }
+
     for (const actor of this.remotes.values()) {
       actor.rig.root.position.lerp(actor.targetPos, Math.min(1, dt * 15));
-      // Shortest angular lerp
       let diff = actor.targetYaw - actor.rig.root.rotation.y;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -1191,55 +1031,12 @@ export class GameEngine {
       actor.rig.update(dt, elapsed, actor.snapshot.movementState, actor.snapshot.pitch);
     }
 
-    // Animate dog tags
-    for (const m of this.tagMeshes.values()) {
-      m.rotation.y += dt * 2.4;
-      m.position.y = 0.55 + Math.sin(elapsed * 3.5) * 0.12;
-    }
-
-    // Update Training Range targets
+    this.objectiveSync.update(dt, elapsed);
     if (this.mode === 'training') {
-      if (this.drillEndsAt > 0 && now >= this.drillEndsAt) {
-        this.drillMode = 'free';
-        this.drillEndsAt = 0;
-      }
-      for (const t of this.rangeTargets) {
-        if (t.hp <= 0 && now >= t.respawnAt) {
-          t.hp = 100;
-          t.group.visible = true;
-        }
-        if (t.moving && t.hp > 0) {
-          t.group.position.x = t.baseX + Math.sin(elapsed * t.speed + t.phase) * 4.5;
-        }
-      }
+      this.trainingRange.update(elapsed, now);
     }
+    this.vfx.update(dt);
 
-    // Update pooled tracers & sparks
-    for (let i = this.tracers.length - 1; i >= 0; i--) {
-      const tr = this.tracers[i];
-      tr.life -= dt;
-      tr.mat.opacity = Math.max(0, tr.life / 0.08);
-      if (tr.life <= 0) {
-        this.scene.remove(tr.line);
-        tr.line.geometry.dispose();
-        tr.mat.dispose();
-        this.tracers.splice(i, 1);
-      }
-    }
-    for (let i = this.sparks.length - 1; i >= 0; i--) {
-      const sp = this.sparks[i];
-      sp.life -= dt;
-      sp.vel.y -= 14 * dt;
-      sp.mesh.position.addScaledVector(sp.vel, dt);
-      if (sp.life <= 0) {
-        this.scene.remove(sp.mesh);
-        sp.mesh.geometry.dispose();
-        (sp.mesh.material as THREE.Material).dispose();
-        this.sparks.splice(i, 1);
-      }
-    }
-
-    // Send authoritative input snapshot at ~30 Hz
     if (this.mode !== 'training' && now - this.lastInputSendAt >= 33) {
       this.lastInputSendAt = now;
       this.inputSeq += 1;
@@ -1261,7 +1058,6 @@ export class GameEngine {
       });
     }
 
-    // Throttle HUD telemetry updates to ~15 Hz so React stays silky-smooth
     if (now - this.lastHudPushAt >= 66) {
       this.lastHudPushAt = now;
       const ammo = this.ammoState.get(this.currentWeapon) ?? { mag: 0, reserve: 0 };
@@ -1269,6 +1065,10 @@ export class GameEngine {
         this.fpsSamples.length > 0
           ? Math.round(this.fpsSamples.reduce((a, b) => a + b, 0) / this.fpsSamples.length)
           : 60;
+      const reloadProgress =
+        this.isReloading && this.reloadEndsAt > this.reloadStartedAt
+          ? Math.max(0, Math.min(1, (now - this.reloadStartedAt) / (this.reloadEndsAt - this.reloadStartedAt)))
+          : 0;
       this.onHudUpdate({
         hp: this.localHp,
         maxHp: 100,
@@ -1276,29 +1076,28 @@ export class GameEngine {
         magSize: wCfg.magSize,
         reserve: ammo.reserve,
         weaponId: this.currentWeapon,
+        primaryWeapon: this.primaryWeapon,
+        secondaryWeapon: this.secondaryWeapon,
         isReloading: this.isReloading,
+        reloadProgress,
         isAds: this.isAds,
         spreadRad: this.computeCurrentSpread(),
         fps: avgFps,
         pingMs: socketClient.pingMs,
         pointerLocked: this.pointerLocked,
         spectatingName,
-        rangeStats:
-          this.mode === 'training'
-            ? {
-                hits: this.rangeHits,
-                shots: this.rangeShots,
-                headshots: this.rangeHeadshots,
-                targetsDown: this.rangeTargetsDown,
-                drillMode: this.drillMode,
-                drillScore: this.drillScore,
-                drillTimeLeft: this.drillEndsAt > 0 ? Math.max(0, Math.ceil((this.drillEndsAt - now) / 1000)) : 0,
-              }
-            : undefined,
+        pos: { x: this.controller.x, y: this.controller.y, z: this.controller.z },
+        yaw: this.controller.yaw,
+        movementState: this.controller.movementState,
+        rangeStats: this.mode === 'training' ? this.trainingRange.getStats(now) : undefined,
       });
     }
 
-    this.renderer.render(this.scene, this.camera);
+    if (this.composer && !this.isSoftwareGl && this.settings.bloom) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
 
     if (this.isSoftwareGl) {
       this.afterDraw(this.tick);
@@ -1309,6 +1108,7 @@ export class GameEngine {
 
   public dispose() {
     this.disposed = true;
+    audioEngine.setAmbientMode('off');
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
     if (document.pointerLockElement === this.renderer.domElement) {
@@ -1323,7 +1123,16 @@ export class GameEngine {
     this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
     this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu);
+    this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
+    this.renderer.domElement.removeEventListener('webglcontextrestored', this.onContextRestored);
 
+    this.disposePostProcessing();
+    this.dustGeo?.dispose();
+    this.dustMat?.dispose();
+    this.envTexture?.dispose();
+    this.vfx.dispose();
+    this.objectiveSync.dispose();
+    this.trainingRange.dispose();
     this.builtMap?.dispose();
     this.viewModel?.dispose();
     for (const a of this.remotes.values()) a.rig.dispose();

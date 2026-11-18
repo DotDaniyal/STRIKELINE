@@ -1,22 +1,34 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
 import type { KeyBindings, PlayerSettings } from '../../shared/types/game.ts';
 import { DEFAULT_SETTINGS } from '../../shared/constants/modes.ts';
-import { CrosshairView } from './CrosshairView.tsx';
+import { CrosshairView } from './hud/CrosshairView.tsx';
 import { audioEngine } from '../game/audio/AudioEngine.ts';
+import { ModalShell } from './ui/ModalShell.tsx';
+import { SegmentedControl } from './ui/SegmentedControl.tsx';
+import { TacticalButton } from './ui/TacticalButton.tsx';
 
 interface Props {
   settings: PlayerSettings;
   onSave: (next: PlayerSettings) => void;
   onClose: () => void;
+  onReplayIntro?: () => void;
 }
 
-export function SettingsModal({ settings, onSave, onClose }: Props) {
+const SETTINGS_TABS = [
+  { id: 'controls', label: 'Controls' },
+  { id: 'crosshair', label: 'Crosshair' },
+  { id: 'graphics', label: 'Graphics' },
+  { id: 'audio', label: 'Audio' },
+  { id: 'access', label: 'Accessibility' },
+] as const;
+
+export function SettingsModal({ settings, onSave, onClose, onReplayIntro }: Props) {
   const [draft, setDraft] = useState<PlayerSettings>(() => JSON.parse(JSON.stringify(settings)));
   const [tab, setTab] = useState<'controls' | 'crosshair' | 'graphics' | 'audio' | 'access'>('controls');
   const [rebindingKey, setRebindingKey] = useState<keyof KeyBindings | null>(null);
 
   const applyPreset = (preset: PlayerSettings['graphicsPreset']) => {
+    audioEngine.playUiClick(660);
     const map: Record<PlayerSettings['graphicsPreset'], Partial<PlayerSettings>> = {
       low: { graphicsPreset: 'low', renderScale: 0.75, shadows: false, bloom: false, showTracers: true },
       medium: { graphicsPreset: 'medium', renderScale: 0.9, shadows: true, bloom: false, showTracers: true },
@@ -27,14 +39,12 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
   };
 
   const handleSave = () => {
-    audioEngine.playUiClick(720);
     onSave(draft);
     onClose();
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
       onKeyDown={(e) => {
         if (rebindingKey) {
           e.preventDefault();
@@ -47,56 +57,47 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
         }
       }}
     >
-      <div className="w-full max-w-4xl max-h-[88vh] bg-[#111620] border border-slate-700 rounded-xl flex flex-col overflow-hidden shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <h2 className="font-display text-xl font-bold tracking-wide text-slate-100">
-            Settings & Crosshair Studio
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center gap-1 px-6 pt-3 border-b border-slate-800 overflow-x-auto">
-          {(
-            [
-              ['controls', 'Controls & Keybinds'],
-              ['crosshair', 'Crosshair Studio'],
-              ['graphics', 'Graphics'],
-              ['audio', 'Audio'],
-              ['access', 'Language & Accessibility'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
+      <ModalShell
+        title="Settings & Crosshair Studio"
+        subtitle="Calibrate input curves, reticle geometry, post-processing bloom, and audio mix"
+        maxWidthClass="max-w-4xl"
+        onClose={onClose}
+        footer={
+          <>
+            <TacticalButton
               type="button"
-              onClick={() => {
-                audioEngine.playUiClick();
-                setTab(id);
-              }}
-              className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                tab === id
-                  ? 'border-amber-500 text-amber-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
+              variant="secondary"
+              size="sm"
+              onClick={() => setDraft(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)))}
             >
-              {label}
-            </button>
-          ))}
-        </div>
+              Reset Defaults
+            </TacticalButton>
+            <div className="flex items-center gap-2.5">
+              <TacticalButton type="button" variant="ghost" size="sm" onClick={onClose}>
+                Cancel
+              </TacticalButton>
+              <TacticalButton type="button" variant="primary" size="md" onClick={handleSave}>
+                Save Settings
+              </TacticalButton>
+            </div>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <SegmentedControl
+            layoutId="settings-tabs"
+            options={SETTINGS_TABS}
+            value={tab}
+            onChange={setTab}
+            size="sm"
+          />
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {tab === 'controls' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-slate-200">Mouse & Aim</h3>
+                <h3 className="font-display text-xs font-bold uppercase tracking-wider text-amber-400">
+                  Mouse &amp; Aim Response
+                </h3>
                 <SliderField
                   label="Mouse Sensitivity"
                   value={draft.sensitivity}
@@ -141,12 +142,14 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 />
               </div>
 
-              <div className="space-y-2.5">
-                <h3 className="text-sm font-semibold text-slate-200 mb-2">Key Bindings (Click to Rebind)</h3>
+              <div className="space-y-2">
+                <h3 className="font-display text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">
+                  Key Bindings (Click to Rebind)
+                </h3>
                 {(Object.keys(draft.keybinds) as Array<keyof KeyBindings>).map((k) => (
                   <div
                     key={k}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0b0e14] border border-slate-800"
+                    className="flex items-center justify-between px-3 py-2 bg-[#07090e] border border-slate-800"
                   >
                     <span className="text-xs text-slate-300 capitalize">
                       {k.replace(/([A-Z])/g, ' $1')}
@@ -154,13 +157,13 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                     <button
                       type="button"
                       onClick={() => setRebindingKey(k)}
-                      className={`px-3 py-1 rounded text-xs font-mono-tabular cursor-pointer ${
+                      className={`px-3 py-1 text-xs font-mono-tabular cursor-pointer sl-chamfer-sm ${
                         rebindingKey === k
                           ? 'bg-amber-500 text-slate-950 font-bold'
                           : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
                       }`}
                     >
-                      {rebindingKey === k ? 'Press Any Key...' : draft.keybinds[k]}
+                      {rebindingKey === k ? 'Press Key...' : draft.keybinds[k]}
                     </button>
                   </div>
                 ))}
@@ -172,7 +175,9 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1.5">Reticle Shape</label>
+                  <label className="block text-[11px] font-mono-tabular uppercase text-slate-400 mb-1.5">
+                    Reticle Shape
+                  </label>
                   <div className="grid grid-cols-4 gap-2">
                     {(['classic', 'dot', 't-shape', 'circle-dot'] as const).map((st) => (
                       <button
@@ -181,10 +186,10 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                         onClick={() =>
                           setDraft({ ...draft, crosshair: { ...draft.crosshair, style: st } })
                         }
-                        className={`py-2 px-2 rounded-lg text-xs font-medium border cursor-pointer ${
+                        className={`py-2 px-2 text-xs font-medium border cursor-pointer sl-chamfer-sm ${
                           draft.crosshair.style === st
                             ? 'bg-amber-500 text-slate-950 border-amber-400 font-semibold'
-                            : 'bg-[#0b0e14] text-slate-300 border-slate-700'
+                            : 'bg-[#07090e] text-slate-300 border-slate-700'
                         }`}
                       >
                         {st}
@@ -194,16 +199,19 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1.5">Reticle Color</label>
+                  <label className="block text-[11px] font-mono-tabular uppercase text-slate-400 mb-1.5">
+                    Reticle Color
+                  </label>
                   <div className="flex items-center gap-2">
                     {['#22d3ee', '#4ade80', '#f59e0b', '#ef4444', '#f8fafc', '#e879f9'].map((c) => (
                       <button
                         key={c}
                         type="button"
+                        aria-label={`Color ${c}`}
                         onClick={() =>
                           setDraft({ ...draft, crosshair: { ...draft.crosshair, color: c } })
                         }
-                        className={`w-7 h-7 rounded-md border-2 cursor-pointer ${
+                        className={`w-7 h-7 border-2 cursor-pointer ${
                           draft.crosshair.color === c ? 'border-white scale-110' : 'border-slate-700'
                         }`}
                         style={{ backgroundColor: c }}
@@ -279,15 +287,13 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 />
               </div>
 
-              {/* Live Crosshair Preview Stage */}
-              <div className="relative rounded-xl border border-slate-700 overflow-hidden bg-gradient-to-br from-slate-700 via-slate-800 to-amber-950/60 min-h-[260px] flex items-center justify-center">
+              <div className="relative sl-chamfer border border-slate-700 overflow-hidden bg-[#151c2a] sl-grid-bg min-h-[260px] flex items-center justify-center">
                 <div className="absolute top-3 left-3 text-xs font-mono-tabular text-slate-300">
                   Live Contrast Preview
                 </div>
                 <div className="relative w-12 h-12 flex items-center justify-center">
-                  {/* Inline scoped preview */}
-                  <div className="scale-150 relative w-0 h-0">
-                    <CrosshairPreviewInline config={draft.crosshair} />
+                  <div className="scale-150">
+                    <CrosshairView config={draft.crosshair} spreadRad={0.01} inline />
                   </div>
                 </div>
               </div>
@@ -297,17 +303,19 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
           {tab === 'graphics' && (
             <div className="space-y-4 max-w-xl">
               <div>
-                <label className="block text-xs text-slate-400 mb-2">Quality Preset</label>
+                <label className="block text-[11px] font-mono-tabular uppercase text-slate-400 mb-2">
+                  Quality Preset
+                </label>
                 <div className="grid grid-cols-4 gap-2">
                   {(['low', 'medium', 'high', 'ultra'] as const).map((p) => (
                     <button
                       key={p}
                       type="button"
                       onClick={() => applyPreset(p)}
-                      className={`py-2.5 rounded-lg text-xs font-semibold uppercase border cursor-pointer ${
+                      className={`py-2.5 text-xs font-display font-bold uppercase border cursor-pointer sl-chamfer-sm ${
                         draft.graphicsPreset === p
                           ? 'bg-amber-500 text-slate-950 border-amber-400'
-                          : 'bg-[#0b0e14] text-slate-300 border-slate-700'
+                          : 'bg-[#07090e] text-slate-300 border-slate-700'
                       }`}
                     >
                       {p}
@@ -329,6 +337,11 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 onChange={(c) => setDraft({ ...draft, shadows: c })}
               />
               <ToggleField
+                label="Bloom & Cinematic Post-FX"
+                checked={draft.bloom}
+                onChange={(c) => setDraft({ ...draft, bloom: c })}
+              />
+              <ToggleField
                 label="Bullet Tracers"
                 checked={draft.showTracers}
                 onChange={(c) => setDraft({ ...draft, showTracers: c })}
@@ -338,6 +351,21 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 checked={draft.showFps}
                 onChange={(c) => setDraft({ ...draft, showFps: c })}
               />
+              {onReplayIntro && (
+                <div className="pt-2">
+                  <TacticalButton
+                    variant="secondary"
+                    size="md"
+                    className="w-full"
+                    onClick={() => {
+                      onClose();
+                      onReplayIntro();
+                    }}
+                  >
+                    Replay Cinematic Intro Sequence
+                  </TacticalButton>
+                </div>
+              )}
             </div>
           )}
 
@@ -402,13 +430,15 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
           {tab === 'access' && (
             <div className="space-y-4 max-w-xl">
               <div>
-                <label className="block text-xs text-slate-400 mb-1.5">Interface Language</label>
+                <label className="block text-[11px] font-mono-tabular uppercase text-slate-400 mb-1.5">
+                  Interface Language
+                </label>
                 <select
                   value={draft.language}
                   onChange={(e) =>
                     setDraft({ ...draft, language: e.target.value as PlayerSettings['language'] })
                   }
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100"
+                  className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100"
                 >
                   <option value="en">English</option>
                   <option value="es">Español</option>
@@ -418,7 +448,9 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1.5">Colorblind Palette Assist</label>
+                <label className="block text-[11px] font-mono-tabular uppercase text-slate-400 mb-1.5">
+                  Colorblind Palette Assist
+                </label>
                 <select
                   value={draft.colorblindMode}
                   onChange={(e) =>
@@ -427,12 +459,12 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
                       colorblindMode: e.target.value as PlayerSettings['colorblindMode'],
                     })
                   }
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0e14] border border-slate-700 text-sm text-slate-100"
+                  className="w-full px-3.5 py-2.5 bg-[#07090e] border border-slate-700 text-sm text-slate-100"
                 >
-                  <option value="none">Standard</option>
-                  <option value="deuteranopia">Deuteranopia</option>
-                  <option value="protanopia">Protanopia</option>
-                  <option value="tritanopia">Tritanopia</option>
+                  <option value="none">Standard (Sky / Crimson)</option>
+                  <option value="deuteranopia">Deuteranopia (Sky / Orange)</option>
+                  <option value="protanopia">Protanopia (Sky / Orange)</option>
+                  <option value="tritanopia">Tritanopia (Teal / Rose)</option>
                 </select>
               </div>
               <SliderField
@@ -446,34 +478,7 @@ export function SettingsModal({ settings, onSave, onClose }: Props) {
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-[#0d1119]">
-          <button
-            type="button"
-            onClick={() => setDraft(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)))}
-            className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white border border-slate-700 cursor-pointer"
-          >
-            Reset Defaults
-          </button>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
-            >
-              Save Settings
-            </button>
-          </div>
-        </div>
-      </div>
+      </ModalShell>
     </div>
   );
 }
@@ -522,7 +527,7 @@ function ToggleField({
   onChange: (c: boolean) => void;
 }) {
   return (
-    <label className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0b0e14] border border-slate-800 cursor-pointer">
+    <label className="flex items-center justify-between px-3 py-2 bg-[#07090e] border border-slate-800 cursor-pointer">
       <span className="text-xs text-slate-300">{label}</span>
       <input
         type="checkbox"
@@ -531,13 +536,5 @@ function ToggleField({
         className="w-4 h-4 accent-amber-500 cursor-pointer"
       />
     </label>
-  );
-}
-
-function CrosshairPreviewInline({ config }: { config: PlayerSettings['crosshair'] }) {
-  return (
-    <div className="relative w-0 h-0">
-      <CrosshairView config={config} spreadRad={0.01} />
-    </div>
   );
 }

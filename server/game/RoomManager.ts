@@ -6,17 +6,17 @@ import type {
   GameModeId,
   MapId,
   MatchMutators,
-  PartyInvite,
-  PartyState,
   RegionId,
   ServerMessage,
   UserProfile,
   WeaponId,
 } from '../../shared/types/game.ts';
-import { MAPS, MULTIPLAYER_MAPS } from '../../shared/constants/maps.ts';
+import { MAPS, MULTIPLAYER_MAPS } from '../../shared/maps/index.ts';
 import { GAME_MODES } from '../../shared/constants/modes.ts';
-import { getBlockedIds, getUserBySession } from '../database/db.ts';
+import { isValidClientMessage } from '../../shared/protocol/messages.ts';
+import { getBlockedIds, getUserBySession } from '../persistence/index.ts';
 import { MatchInstance } from './MatchInstance.ts';
+import { PartyManager } from './partyManager.ts';
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -35,13 +35,7 @@ interface ConnectedClient {
   operatorSkin: string;
 }
 
-interface InternalParty {
-  id: string;
-  leaderId: string;
-  memberIds: string[];
-}
-
-const BANNED_WORDS = ['cheater', 'slur_placeholder']; // Clean extensible profanity filter
+const BANNED_WORDS = ['cheater', 'slur_placeholder'];
 
 function moderateChat(text: string): string {
   let clean = text.trim().slice(0, 220);
@@ -55,16 +49,29 @@ export class RoomManager {
   private clientsByWs = new Map<WebSocket, ConnectedClient>();
   private clientsByUser = new Map<string, ConnectedClient>();
   private rooms = new Map<string, MatchInstance>();
-  private roomByCode = new Map<string, string>(); // code -> roomId
-  private parties = new Map<string, InternalParty>();
-  private invites = new Map<string, PartyInvite>();
+  private roomByCode = new Map<string, string>();
+  private partyManager: PartyManager;
   private startedAt = Date.now();
+
+  constructor() {
+    this.partyManager = new PartyManager(
+      (uid) => this.clientsByUser.get(uid),
+      (uid, msg) => {
+        const client = this.clientsByUser.get(uid);
+        if (client) this.send(client.ws, msg);
+      }
+    );
+  }
 
   public handleConnection(ws: WebSocket) {
     ws.on('message', (raw) => {
       try {
-        const msg = JSON.parse(raw.toString()) as ClientMessage;
-        this.handleMessage(ws, msg);
+        const parsed = JSON.parse(raw.toString()) as unknown;
+        if (!isValidClientMessage(parsed)) {
+          this.send(ws, { type: 'error', message: 'Invalid protocol payload.' });
+          return;
+        }
+        this.handleMessage(ws, parsed);
       } catch {
         this.send(ws, { type: 'error', message: 'Malformed protocol payload.' });
       }
@@ -88,7 +95,6 @@ export class RoomManager {
         return;
       }
 
-      // Close previous connection if duplicate login
       const prev = this.clientsByUser.get(profile.id);
       if (prev && prev.ws !== ws) {
         this.handleDisconnect(prev.ws);
@@ -193,22 +199,22 @@ export class RoomManager {
         this.handleChat(client, msg.channel, msg.text);
         break;
       case 'party_create':
-        this.createParty(client);
+        this.partyManager.createParty(client);
         break;
       case 'party_invite':
-        this.inviteToParty(client, msg.targetUserId);
+        this.partyManager.inviteToParty(client, msg.targetUserId);
         break;
       case 'party_respond_invite':
-        this.respondPartyInvite(client, msg.inviteId, msg.accept);
+        this.partyManager.respondPartyInvite(client, msg.inviteId, msg.accept);
         break;
       case 'party_leave':
-        this.leaveParty(client);
+        this.partyManager.leaveParty(client);
         break;
       case 'party_kick':
-        this.kickFromParty(client, msg.targetUserId);
+        this.partyManager.kickFromParty(client, msg.targetUserId);
         break;
       case 'party_transfer_leader':
-        this.transferPartyLeader(client, msg.targetUserId);
+        this.partyManager.transferPartyLeader(client, msg.targetUserId);
         break;
       case 'voice_signal': {
         const target = this.clientsByUser.get(msg.targetId);
@@ -240,25 +246,21 @@ export class RoomManager {
     if (!GAME_MODES[mode]) return;
     this.leaveCurrentRoom(client);
 
-    // Collect party members if leader
     const partyMembers: ConnectedClient[] = [client];
-    if (client.partyId) {
-      const party = this.parties.get(client.partyId);
-      if (party) {
-        if (party.leaderId !== client.userId) {
-          this.send(client.ws, { type: 'error', message: 'Only the party leader can start matchmaking.' });
-          return;
-        }
-        for (const mid of party.memberIds) {
-          if (mid !== client.userId) {
-            const mClient = this.clientsByUser.get(mid);
-            if (mClient) partyMembers.push(mClient);
-          }
+    const memberIds = this.partyManager.getPartyMemberIds(client.partyId);
+    if (memberIds) {
+      if (this.partyManager.getPartyLeader(client.partyId) !== client.userId) {
+        this.send(client.ws, { type: 'error', message: 'Only the party leader can start matchmaking.' });
+        return;
+      }
+      for (const mid of memberIds) {
+        if (mid !== client.userId) {
+          const mClient = this.clientsByUser.get(mid);
+          if (mClient) partyMembers.push(mClient);
         }
       }
     }
 
-    // Look for an open public room matching mode & region (and optionally map) with enough slots
     let targetRoom: MatchInstance | null = null;
     for (const room of this.rooms.values()) {
       if (
@@ -429,10 +431,9 @@ export class RoomManager {
     };
 
     if (channel === 'party') {
-      if (!client.partyId) return;
-      const party = this.parties.get(client.partyId);
-      if (!party) return;
-      for (const mid of party.memberIds) {
+      const memberIds = this.partyManager.getPartyMemberIds(client.partyId);
+      if (!memberIds) return;
+      for (const mid of memberIds) {
         const target = this.clientsByUser.get(mid);
         if (target) {
           const blocked = getBlockedIds(target.userId);
@@ -452,113 +453,11 @@ export class RoomManager {
     room.broadcastChat(msg, senderTeam);
   }
 
-  // Party System
-  private createParty(client: ConnectedClient) {
-    if (client.partyId) return;
-    const id = 'pty_' + crypto.randomBytes(4).toString('hex');
-    const party: InternalParty = { id, leaderId: client.userId, memberIds: [client.userId] };
-    this.parties.set(id, party);
-    client.partyId = id;
-    this.broadcastParty(party);
-  }
-
-  private inviteToParty(client: ConnectedClient, targetUserId: string) {
-    if (!client.partyId) this.createParty(client);
-    const party = client.partyId ? this.parties.get(client.partyId) : null;
-    if (!party || party.leaderId !== client.userId) return;
-    if (party.memberIds.length >= 4) {
-      this.send(client.ws, { type: 'error', message: 'Party is full (max 4).' });
-      return;
-    }
-    const target = this.clientsByUser.get(targetUserId);
-    if (!target) {
-      this.send(client.ws, { type: 'error', message: 'Player is currently offline.' });
-      return;
-    }
-    const blocked = getBlockedIds(target.userId);
-    if (blocked.includes(client.userId)) return;
-
-    const invite: PartyInvite = {
-      id: 'inv_' + crypto.randomBytes(4).toString('hex'),
-      partyId: party.id,
-      fromUserId: client.userId,
-      fromUsername: client.username,
-      expiresAt: Date.now() + 60000,
-    };
-    this.invites.set(invite.id, invite);
-    this.send(target.ws, { type: 'party_invite_received', invite });
-  }
-
-  private respondPartyInvite(client: ConnectedClient, inviteId: string, accept: boolean) {
-    const invite = this.invites.get(inviteId);
-    this.invites.delete(inviteId);
-    if (!invite || !accept || invite.expiresAt < Date.now()) return;
-    const party = this.parties.get(invite.partyId);
-    if (!party || party.memberIds.length >= 4) return;
-
-    this.leaveParty(client);
-    party.memberIds.push(client.userId);
-    client.partyId = party.id;
-    this.broadcastParty(party);
-  }
-
-  private leaveParty(client: ConnectedClient) {
-    if (!client.partyId) return;
-    const party = this.parties.get(client.partyId);
-    client.partyId = null;
-    this.send(client.ws, { type: 'party_update', party: null });
-    if (!party) return;
-
-    party.memberIds = party.memberIds.filter((id) => id !== client.userId);
-    if (party.memberIds.length === 0) {
-      this.parties.delete(party.id);
-      return;
-    }
-    if (party.leaderId === client.userId) {
-      party.leaderId = party.memberIds[0];
-    }
-    this.broadcastParty(party);
-  }
-
-  private kickFromParty(client: ConnectedClient, targetUserId: string) {
-    const party = client.partyId ? this.parties.get(client.partyId) : null;
-    if (!party || party.leaderId !== client.userId || targetUserId === client.userId) return;
-    const target = this.clientsByUser.get(targetUserId);
-    if (target) this.leaveParty(target);
-  }
-
-  private transferPartyLeader(client: ConnectedClient, targetUserId: string) {
-    const party = client.partyId ? this.parties.get(client.partyId) : null;
-    if (!party || party.leaderId !== client.userId || !party.memberIds.includes(targetUserId)) return;
-    party.leaderId = targetUserId;
-    this.broadcastParty(party);
-  }
-
-  private broadcastParty(party: InternalParty) {
-    const state: PartyState = {
-      id: party.id,
-      leaderId: party.leaderId,
-      members: party.memberIds.map((id) => {
-        const c = this.clientsByUser.get(id);
-        return {
-          id,
-          username: c?.username ?? 'Operative',
-          level: c?.level ?? 1,
-          ready: true,
-        };
-      }),
-    };
-    for (const mid of party.memberIds) {
-      const c = this.clientsByUser.get(mid);
-      if (c) this.send(c.ws, { type: 'party_update', party: state });
-    }
-  }
-
   private handleDisconnect(ws: WebSocket) {
     const client = this.clientsByWs.get(ws);
     if (!client) return;
     this.leaveCurrentRoom(client);
-    this.leaveParty(client);
+    this.partyManager.leaveParty(client);
     this.clientsByWs.delete(ws);
     if (this.clientsByUser.get(client.userId)?.ws === ws) {
       this.clientsByUser.delete(client.userId);

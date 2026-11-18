@@ -80,31 +80,31 @@ export function MobileControls({ engine, scale = 1 }: Props) {
 
       {/* Left Movement Thumbstick */}
       <div
-        className="absolute left-6 bottom-8 w-28 h-28 rounded-full border-2 border-white/25 bg-black/35 pointer-events-auto flex items-center justify-center touch-none"
-        style={{ transform: `scale(${scale})` }}
+        className="absolute left-5 bottom-24 sm:bottom-8 w-28 h-28 sl-chamfer border-2 border-slate-500/50 bg-[#07090e]/55 pointer-events-auto flex items-center justify-center touch-none"
+        style={{ transform: `scale(${scale})`, transformOrigin: 'bottom left' }}
         onTouchStart={handleStickStart}
         onTouchMove={handleStickMove}
         onTouchEnd={handleStickEnd}
       >
         <div
-          className="w-12 h-12 rounded-full bg-amber-500/80 border border-amber-200"
+          className="w-12 h-12 sl-chamfer-sm bg-amber-500/85 border border-amber-200"
           style={{ transform: `translate(${stickOffset.x}px, ${stickOffset.y}px)` }}
         />
       </div>
 
       {/* Right Action Buttons (>=44px touch targets) */}
       <div
-        className="absolute right-5 bottom-7 flex items-end gap-3 pointer-events-auto"
+        className="absolute right-4 bottom-24 sm:bottom-7 flex items-end gap-2.5 pointer-events-auto"
         style={{ transform: `scale(${scale})`, transformOrigin: 'bottom right' }}
       >
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2">
           <button
             type="button"
             onTouchStart={(e) => {
               e.stopPropagation();
               engine?.swapWeaponSlot();
             }}
-            className="w-12 h-12 rounded-full bg-slate-900/80 border border-slate-500 text-xs font-bold text-slate-100 active:bg-amber-500 active:text-black"
+            className="w-12 h-12 sl-chamfer-sm bg-[#0c1018]/85 border border-slate-500 font-display text-[11px] font-bold text-slate-100 active:bg-amber-500 active:text-slate-950"
           >
             SWAP
           </button>
@@ -114,7 +114,7 @@ export function MobileControls({ engine, scale = 1 }: Props) {
               e.stopPropagation();
               engine?.triggerReload();
             }}
-            className="w-12 h-12 rounded-full bg-slate-900/80 border border-slate-500 text-xs font-bold text-slate-100 active:bg-amber-500 active:text-black"
+            className="w-12 h-12 sl-chamfer-sm bg-[#0c1018]/85 border border-slate-500 font-display text-[11px] font-bold text-slate-100 active:bg-amber-500 active:text-slate-950"
           >
             RLD
           </button>
@@ -124,13 +124,13 @@ export function MobileControls({ engine, scale = 1 }: Props) {
               e.stopPropagation();
               engine?.toggleTouchCrouch();
             }}
-            className="w-12 h-12 rounded-full bg-slate-900/80 border border-slate-500 text-xs font-bold text-slate-100 active:bg-amber-500 active:text-black"
+            className="w-12 h-12 sl-chamfer-sm bg-[#0c1018]/85 border border-slate-500 font-display text-[11px] font-bold text-slate-100 active:bg-amber-500 active:text-slate-950"
           >
             SLIDE
           </button>
         </div>
 
-        <div className="flex flex-col gap-3 items-center">
+        <div className="flex flex-col gap-2.5 items-center">
           <button
             type="button"
             onTouchStart={(e) => {
@@ -139,10 +139,10 @@ export function MobileControls({ engine, scale = 1 }: Props) {
               setAdsActive(next);
               engine?.setTouchAds(next);
             }}
-            className={`w-13 h-13 rounded-full border text-xs font-bold ${
+            className={`w-13 h-13 sl-chamfer-sm border font-display text-xs font-bold ${
               adsActive
-                ? 'bg-cyan-500 text-slate-950 border-cyan-200'
-                : 'bg-slate-900/80 text-slate-100 border-slate-500'
+                ? 'bg-sky-500 text-slate-950 border-sky-200'
+                : 'bg-[#0c1018]/85 text-slate-100 border-slate-500'
             }`}
           >
             ADS
@@ -153,7 +153,7 @@ export function MobileControls({ engine, scale = 1 }: Props) {
               e.stopPropagation();
               engine?.triggerJump();
             }}
-            className="w-14 h-14 rounded-full bg-slate-900/80 border border-slate-400 text-xs font-bold text-slate-100 active:bg-slate-600"
+            className="w-14 h-14 sl-chamfer-sm bg-[#0c1018]/85 border border-slate-400 font-display text-xs font-bold text-slate-100 active:bg-slate-600"
           >
             JUMP
           </button>
@@ -169,7 +169,7 @@ export function MobileControls({ engine, scale = 1 }: Props) {
             e.stopPropagation();
             engine?.setTouchFire(false);
           }}
-          className="w-18 h-18 rounded-full bg-amber-500/85 border-2 border-amber-200 text-sm font-display font-bold text-slate-950 active:scale-95"
+          className="w-18 h-18 sl-chamfer bg-amber-500/90 border-2 border-amber-200 text-sm font-display font-bold text-slate-950 active:scale-95 shadow-lg"
         >
           FIRE
         </button>

@@ -1,4 +1,4 @@
-import type { CrosshairSettings } from '../../shared/types/game.ts';
+import type { CrosshairSettings } from '../../../shared/types/game.ts';
 
 interface Props {
   config: CrosshairSettings;
@@ -6,10 +6,19 @@ interface Props {
   isAds?: boolean;
   isSniper?: boolean;
   hitmarker?: { active: boolean; headshot: boolean };
+  headshotHex?: string;
+  inline?: boolean;
 }
 
-export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSniper = false, hitmarker }: Props) {
-  // Sniper scope vignette when ADS
+export function CrosshairView({
+  config,
+  spreadRad = 0.02,
+  isAds = false,
+  isSniper = false,
+  hitmarker,
+  headshotHex = '#ef4444',
+  inline = false,
+}: Props) {
   if (isSniper && isAds) {
     return (
       <div className="pointer-events-none fixed inset-0 flex items-center justify-center z-20">
@@ -20,7 +29,6 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
             <line x1="16" y1="100" x2="184" y2="100" stroke="rgba(15,23,42,0.9)" strokeWidth="0.9" />
             <line x1="100" y1="16" x2="100" y2="184" stroke="rgba(15,23,42,0.9)" strokeWidth="0.9" />
             <circle cx="100" cy="100" r="2.2" fill="#ef4444" />
-            {/* Mildot ticks */}
             {[-40, -25, -12, 12, 25, 40].map((off) => (
               <g key={off}>
                 <line x1={100 + off} y1="97" x2={100 + off} y2="103" stroke="#0f172a" strokeWidth="0.8" />
@@ -41,13 +49,16 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
 
   return (
     <div
-      className="pointer-events-none fixed inset-0 flex items-center justify-center z-20"
+      className={
+        inline
+          ? 'pointer-events-none relative flex items-center justify-center'
+          : 'pointer-events-none fixed inset-0 flex items-center justify-center z-20'
+      }
       style={{ opacity: config.opacity }}
     >
       <div className="relative w-0 h-0">
         {config.style !== 'dot' && (
           <>
-            {/* Top arm (omitted for T-shape) */}
             {config.style !== 't-shape' && (
               <div
                 style={{
@@ -61,7 +72,6 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
                 }}
               />
             )}
-            {/* Bottom arm */}
             <div
               style={{
                 position: 'absolute',
@@ -73,7 +83,6 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
                 boxShadow: shadow,
               }}
             />
-            {/* Left arm */}
             <div
               style={{
                 position: 'absolute',
@@ -85,7 +94,6 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
                 boxShadow: shadow,
               }}
             />
-            {/* Right arm */}
             <div
               style={{
                 position: 'absolute',
@@ -130,7 +138,6 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
           />
         )}
 
-        {/* Hitmarker Feedback X */}
         {hitmarker?.active && (
           <svg
             className="absolute -translate-x-1/2 -translate-y-1/2"
@@ -138,7 +145,7 @@ export function CrosshairView({ config, spreadRad = 0.02, isAds = false, isSnipe
             height="32"
             viewBox="0 0 32 32"
           >
-            <g stroke={hitmarker.headshot ? '#ef4444' : '#f8fafc'} strokeWidth="2.2" strokeLinecap="round">
+            <g stroke={hitmarker.headshot ? headshotHex : '#f8fafc'} strokeWidth="2.2" strokeLinecap="round">
               <line x1="6" y1="6" x2="12" y2="12" />
               <line x1="26" y1="6" x2="20" y2="12" />
               <line x1="6" y1="26" x2="12" y2="20" />
